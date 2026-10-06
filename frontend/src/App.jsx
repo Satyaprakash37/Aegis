@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import Login from './pages/Login';
@@ -9,8 +9,31 @@ import Assets from './pages/Assets';
 import Scans from './pages/Scans';
 import Vulnerabilities from './pages/Vulnerabilities';
 import Reports from './pages/Reports';
+import NotFound from './pages/NotFound';
+import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Loader2 } from 'lucide-react';
+
+function PageTitleUpdater() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const titles = {
+      '/': 'AEGIS | Security Operations Dashboard',
+      '/assets': 'AEGIS | Asset Inventory',
+      '/scans': 'AEGIS | Vulnerability Scanners',
+      '/vulns': 'AEGIS | Vulnerability Register',
+      '/vulnerabilities': 'AEGIS | Vulnerability Register',
+      '/reports': 'AEGIS | Compliance & Audit Reports',
+      '/login': 'AEGIS | Authentication Portal',
+      '/register': 'AEGIS | Analyst Registration',
+    };
+
+    document.title = titles[location.pathname] || 'AEGIS | Vulnerability Management Platform';
+  }, [location]);
+
+  return null;
+}
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -49,29 +72,33 @@ function AppLayout() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="assets" element={<Assets />} />
-            <Route path="scans" element={<Scans />} />
-            <Route path="vulns" element={<Vulnerabilities />} />
-            <Route path="vulnerabilities" element={<Vulnerabilities />} />
-            <Route path="reports" element={<Reports />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <PageTitleUpdater />
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Dashboard />} />
+              <Route path="assets" element={<Assets />} />
+              <Route path="scans" element={<Scans />} />
+              <Route path="vulns" element={<Vulnerabilities />} />
+              <Route path="vulnerabilities" element={<Vulnerabilities />} />
+              <Route path="reports" element={<Reports />} />
+            </Route>
+            <Route path="/404" element={<NotFound />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
