@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import Assets from './pages/Assets';
 import Scans from './pages/Scans';
 import Vulnerabilities from './pages/Vulnerabilities';
+import Reports from './pages/Reports';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Loader2 } from 'lucide-react';
 
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="scans" element={<Scans />} />
             <Route path="vulns" element={<Vulnerabilities />} />
             <Route path="vulnerabilities" element={<Vulnerabilities />} />
+            <Route path="reports" element={<Reports />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

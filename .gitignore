@@ -50,3 +50,10 @@ postgres_data/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Generated Reports
+backend/reports/*.pdf
+backend/reports/*.xlsx
+reports/*.pdf
+reports/*.xlsx
+!backend/reports/.gitkeep

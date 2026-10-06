@@ -75,13 +75,28 @@ docker compose up --build -d
 
 ---
 
+## Core Features
+
+- **Continuous Asset Inventory:** Complete IP and infrastructure management with criticality rankings (1-5), environment mapping, and real-time vulnerability aggregation.
+- **Nmap Port Scanner:** Multi-threaded asynchronous port and service version scanner (Quick 100 ports & Full 1000 ports) running securely inside Docker.
+- **NVD API 2.0 Threat Enrichment:** Automated CVE lookup by detected product, service, and version with CVSS v3.1 scoring.
+- **Contextual Risk Prioritization:** Industry-standard composite scoring:
+  $$\text{risk\_score} = \text{round}((\text{cvss\_score} \times 0.6) + (\text{criticality\_weight} \times 0.4), 2)$$
+- **Cybersecurity Command Center:** Real-time SOC dashboard featuring live severity donut chart, 30-day vulnerability velocity area chart, top risky infrastructure nodes, and recent threat discoveries.
+- **Report Generation Engine (Phase 6):**
+  - **Executive Risk Briefing (PDF):** C-suite summary with risk posture statement, key metrics, top 10 riskiest findings, and prioritized strategic recommendations.
+  - **Detailed Technical Audit (PDF):** Engineering dossier with full asset inventory, scan history, and all vulnerability dossiers grouped by target host.
+  - **Compliance Audit Matrix (Excel):** Multi-sheet audit spreadsheet with auto-filters, frozen headers, severity color-coded cells, and SLA breakdown for regulatory compliance.
+
+---
+
 ## Project Status
 
 - [x] **Phase 0:** Project Foundation & Docker Multi-Service Setup
-- [ ] **Phase 1:** SQLAlchemy Models & Alembic Migrations
-- [ ] **Phase 2:** Authentication & RBAC (JWT Bearer)
-- [ ] **Phase 3:** Network Asset Inventory CRUD
-- [ ] **Phase 4:** Nmap Engine & NVD CVE Enrichment
-- [ ] **Phase 5:** Contextual Risk Engine & Interactive Analytics
-- [ ] **Phase 6:** PDF / Excel Compliance Report Generation
+- [x] **Phase 1:** SQLAlchemy Models & Alembic Migrations
+- [x] **Phase 2:** Authentication & RBAC (JWT Bearer)
+- [x] **Phase 3:** Network Asset Inventory CRUD
+- [x] **Phase 4:** Nmap Engine & NVD CVE Enrichment
+- [x] **Phase 5:** Contextual Risk Engine & Interactive Analytics
+- [x] **Phase 6:** PDF / Excel Compliance Report Generation
 - [ ] **Phase 7:** Seeding, Security Hardening & Platform Release

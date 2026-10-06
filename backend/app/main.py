@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import assets, auth, dashboard, health, scans, vulns
+from app.api.routes import assets, auth, dashboard, health, reports, scans, vulns
 from app.core.config import settings
 
 # Configure logging
@@ -74,3 +74,4 @@ app.include_router(assets.router, prefix="/api")
 app.include_router(scans.router, prefix="/api")
 app.include_router(vulns.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(reports.router, prefix="/api")

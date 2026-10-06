@@ -30,7 +30,9 @@ COPY --from=builder /install /usr/local
 
 COPY --chown=appuser:appgroup . .
 
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh && \
+    mkdir -p /app/reports && \
+    chown -R appuser:appgroup /app/reports
 
 USER appuser
 
