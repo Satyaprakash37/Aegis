@@ -5,6 +5,8 @@ import Topbar from './components/Topbar';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Assets from './pages/Assets';
+import Scans from './pages/Scans';
+import Vulnerabilities from './pages/Vulnerabilities';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { 
   ShieldCheck, 
@@ -209,6 +211,9 @@ export default function App() {
           >
             <Route index element={<DashboardOverview />} />
             <Route path="assets" element={<Assets />} />
+            <Route path="scans" element={<Scans />} />
+            <Route path="vulns" element={<Vulnerabilities />} />
+            <Route path="vulnerabilities" element={<Vulnerabilities />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

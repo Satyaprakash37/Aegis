@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import assets, auth, health
+from app.api.routes import assets, auth, health, scans, vulns
 from app.core.config import settings
 
 # Configure logging
@@ -71,3 +71,5 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
+app.include_router(scans.router, prefix="/api")
+app.include_router(vulns.router, prefix="/api")

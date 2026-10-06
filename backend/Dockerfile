@@ -19,6 +19,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    nmap \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root system user and group

@@ -17,7 +17,7 @@ export default function Sidebar() {
   const navItems = [
     { id: 'dashboard', path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'assets', path: '/assets', label: 'Assets', icon: Server },
-    { id: 'vulnerabilities', path: '/vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
+    { id: 'vulnerabilities', path: '/vulns', label: 'Vulnerabilities', icon: ShieldAlert },
     { id: 'scans', path: '/scans', label: 'Scans', icon: Activity },
     { id: 'reports', path: '/reports', label: 'Reports', icon: FileText },
   ];
@@ -47,7 +47,8 @@ export default function Sidebar() {
         </div>
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = location.pathname === item.path;
+          const isActive = location.pathname === item.path || 
+            (item.id === 'vulnerabilities' && location.pathname.startsWith('/vuln'));
           return (
             <button
               key={item.id}

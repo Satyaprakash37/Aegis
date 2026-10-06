@@ -13,11 +13,18 @@ from app.schemas.asset import (
     AssetListResponse,
     VulnSeverityCounts,
 )
-from app.schemas.scan import ScanBase, ScanCreate, ScanRead
+from app.schemas.scan import (
+    ScanBase,
+    ScanCreate,
+    ScanRead,
+    ScanDetailRead,
+    ScanListResponse,
+)
 from app.schemas.vulnerability import (
     VulnerabilityBase,
     VulnerabilityCreate,
     VulnerabilityRead,
+    VulnerabilityListResponse,
 )
 from app.schemas.report import ReportBase, ReportCreate, ReportRead
 
@@ -37,9 +44,12 @@ __all__ = [
     "ScanBase",
     "ScanCreate",
     "ScanRead",
+    "ScanDetailRead",
+    "ScanListResponse",
     "VulnerabilityBase",
     "VulnerabilityCreate",
     "VulnerabilityRead",
+    "VulnerabilityListResponse",
     "ReportBase",
     "ReportCreate",
     "ReportRead",
