@@ -184,18 +184,23 @@ export default function Scans() {
         </button>
       </div>
 
-      {/* Top Section: Scan Launcher Card */}
-      <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md">
-        <div className="flex items-center gap-2 mb-4">
-          <Terminal className="w-4 h-4 text-cyan-400" />
-          <h2 className="text-sm font-semibold text-white font-mono uppercase tracking-wider">
-            Initiate Vulnerability Scan
-          </h2>
+      {/* Top Section: Scan Launcher */}
+      <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-cyan-400" />
+            <h2 className="text-sm font-semibold text-white font-mono uppercase tracking-wider">
+              Initiate Vulnerability Scan
+            </h2>
+          </div>
+          <span className="text-[11px] font-mono text-cyan-400 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/40">
+            Nmap Engine + Nuclei v3 Active Verification
+          </span>
         </div>
 
-        <form onSubmit={handleStartScan} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+        <form onSubmit={handleStartScan} className="space-y-4">
           {/* Target Asset Dropdown */}
-          <div className="md:col-span-5">
+          <div className="max-w-xl">
             <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
               Target Infrastructure Asset *
             </label>
@@ -219,43 +224,116 @@ export default function Scans() {
             </div>
           </div>
 
-          {/* Scan Type Toggle */}
-          <div className="md:col-span-4">
-            <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-              Scan Profile
+          {/* 3 Profile Selection Cards */}
+          <div>
+            <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-2">
+              Select Scan Profile
             </label>
-            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 rounded-lg border border-slate-800">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* Card 1: Quick */}
               <button
                 type="button"
                 onClick={() => setScanType('quick')}
-                className={`py-1.5 px-3 rounded text-xs font-mono font-medium transition-all ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
                   scanType === 'quick'
-                    ? 'bg-cyan-500 text-slate-950 font-semibold shadow-[0_0_10px_rgba(6,182,212,0.3)]'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'border-cyan-500 bg-cyan-950/20 shadow-[0_0_15px_rgba(6,182,212,0.15)] ring-1 ring-cyan-500/50'
+                    : 'border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/60'
                 }`}
               >
-                Quick (Top 100)
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-mono font-bold uppercase text-white">Quick Scan</span>
+                    <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">~1 min</span>
+                  </div>
+                  <p className="text-xs text-slate-300 font-sans leading-relaxed">
+                    Nmap service fingerprinting on top 100 common ports with NVD version correlation.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-800/60 text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                  <span>-sV --top-ports 100</span>
+                </div>
               </button>
+
+              {/* Card 2: Full */}
               <button
                 type="button"
                 onClick={() => setScanType('full')}
-                className={`py-1.5 px-3 rounded text-xs font-mono font-medium transition-all ${
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
                   scanType === 'full'
-                    ? 'bg-cyan-500 text-slate-950 font-semibold shadow-[0_0_10px_rgba(6,182,212,0.3)]'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'border-cyan-500 bg-cyan-950/20 shadow-[0_0_15px_rgba(6,182,212,0.15)] ring-1 ring-cyan-500/50'
+                    : 'border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/60'
                 }`}
               >
-                Full (1-1000)
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-mono font-bold uppercase text-white">Full Port Scan</span>
+                    <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">~2-3 min</span>
+                  </div>
+                  <p className="text-xs text-slate-300 font-sans leading-relaxed">
+                    Deeper port sweep across standard services (ports 1-1000) with CVE intelligence matching.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-800/60 text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                  <span>-sV -p 1-1000</span>
+                </div>
+              </button>
+
+              {/* Card 3: Deep Active Verification (RECOMMENDED) */}
+              <button
+                type="button"
+                onClick={() => setScanType('deep')}
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                  scanType === 'deep'
+                    ? 'border-emerald-500 bg-emerald-950/20 shadow-[0_0_20px_rgba(16,185,129,0.2)] ring-1 ring-emerald-500/50'
+                    : 'border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/60'
+                }`}
+              >
+                <div className="absolute -top-2.5 right-3 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.4)]">
+                  RECOMMENDED
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-mono font-bold uppercase text-emerald-400 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 fill-emerald-400 text-emerald-400" />
+                      Deep Active Verification
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-400/80 bg-emerald-950/60 border border-emerald-800/40 px-1.5 py-0.5 rounded">Multi-Stage</span>
+                  </div>
+                  <p className="text-xs text-slate-300 font-sans leading-relaxed">
+                    Active verification with Nmap NSE vuln scripts and live Nuclei dynamic exploitation with proof of concept evidence.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-800/60 text-[11px] font-mono text-emerald-300/80 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Nmap Top 500 + NSE + Nuclei v3</span>
+                </div>
               </button>
             </div>
           </div>
 
-          {/* Launch Button */}
-          <div className="md:col-span-3">
+          {/* Action Launch Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+            <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+              <Zap className="w-3.5 h-3.5 text-cyan-400" />
+              <span>
+                {scanType === 'deep' 
+                  ? 'Deep scan actively probes for verified exploitability without guessing.' 
+                  : scanType === 'full' 
+                  ? 'Full scan covers 1,000 standard ports with NVD version matching.' 
+                  : 'Quick scan offers fast discovery on top 100 ports.'}
+              </span>
+            </div>
+
             <button
               type="submit"
               disabled={submitting || assets.length === 0}
-              className="w-full py-2.5 px-4 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs font-mono transition-all shadow-[0_0_15px_rgba(6,182,212,0.25)] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className={`w-full sm:w-auto py-2.5 px-6 rounded-lg font-semibold text-xs font-mono transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
+                scanType === 'deep'
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                  : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-[0_0_15px_rgba(6,182,212,0.25)]'
+              }`}
             >
               {submitting ? (
                 <>
@@ -265,17 +343,12 @@ export default function Scans() {
               ) : (
                 <>
                   <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>Start Scan</span>
+                  <span>Start {scanType === 'deep' ? 'Deep Active' : scanType === 'full' ? 'Full' : 'Quick'} Scan</span>
                 </>
               )}
             </button>
           </div>
         </form>
-
-        <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500 font-mono">
-          <Zap className="w-3.5 h-3.5 text-cyan-400/70" />
-          <span>Quick scan runs -sV --top-ports 100. Full scan examines ports 1-1000 with NVD CVE enrichment.</span>
-        </div>
       </div>
 
       {/* Scan History Table */}
@@ -352,8 +425,21 @@ export default function Scans() {
                     </td>
 
                     {/* Scan Type */}
-                    <td className="py-3.5 px-4 font-mono uppercase text-slate-300">
-                      {scan.scan_type}
+                    <td className="py-3.5 px-4 font-mono text-xs">
+                      {scan.scan_type === 'deep' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]">
+                          <Zap className="w-3 h-3 fill-emerald-400 text-emerald-400" />
+                          <span>DEEP ACTIVE</span>
+                        </span>
+                      ) : scan.scan_type === 'full' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                          FULL (1-1000)
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                          QUICK
+                        </span>
+                      )}
                     </td>
 
                     {/* Status */}

@@ -34,6 +34,7 @@ class ScanRead(BaseModel):
 
 class ScanDetailRead(ScanRead):
     vuln_counts: VulnSeverityCounts = Field(default_factory=VulnSeverityCounts)
+    verification_breakdown: Optional[Dict[str, int]] = None
 
 
 class ScanListResponse(BaseModel):

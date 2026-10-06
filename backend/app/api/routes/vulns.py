@@ -9,7 +9,12 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_current_user, require_admin, require_analyst_or_admin
 from app.db.session import get_db
 from app.models.user import User
-from app.models.vulnerability import Vulnerability, VulnerabilitySeverity, VulnerabilityStatus
+from app.models.vulnerability import (
+    VerificationType,
+    Vulnerability,
+    VulnerabilitySeverity,
+    VulnerabilityStatus,
+)
 from app.schemas.vulnerability import (
     RiskRecalculateResponse,
     VulnerabilityListResponse,
@@ -17,8 +22,42 @@ from app.schemas.vulnerability import (
     VulnerabilityStatusUpdate,
 )
 from app.services.risk.engine import calculate_risk_score, get_risk_tier
+from app.services.risk.danger_engine import evaluate_vulnerability_danger
 
 router = APIRouter(prefix="/vulns", tags=["Vulnerabilities"])
+
+
+def _map_vuln_to_read(v: Vulnerability) -> VulnerabilityRead:
+    """Helper to convert ORM model to Pydantic schema."""
+    return VulnerabilityRead(
+        id=v.id,
+        scan_id=v.scan_id,
+        asset_id=v.asset_id,
+        asset_name=v.asset.name if v.asset else f"Asset #{v.asset_id}",
+        asset_ip=v.asset.ip_address if v.asset else None,
+        asset_criticality=v.asset.criticality if v.asset else 3,
+        risk_tier=get_risk_tier(v.risk_score),
+        cve_id=v.cve_id,
+        title=v.title,
+        description=v.description,
+        cvss_score=v.cvss_score,
+        severity=v.severity,
+        port=v.port,
+        service=v.service,
+        service_version=v.service_version,
+        risk_score=v.risk_score,
+        epss_score=v.epss_score,
+        status=v.status,
+        remediation=v.remediation,
+        verification=v.verification,
+        evidence=v.evidence,
+        danger_score=v.danger_score,
+        exploitability=v.exploitability,
+        impact=v.impact,
+        public_exploit=v.public_exploit,
+        first_seen_at=v.first_seen_at,
+        last_seen_at=v.last_seen_at,
+    )
 
 
 @router.post("/recalculate-risk", response_model=RiskRecalculateResponse)
@@ -26,10 +65,9 @@ async def recalculate_all_risk_scores(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)],
 ) -> RiskRecalculateResponse:
-    """Recalculate contextual risk scores for ALL vulnerabilities based on asset criticalities.
+    """Recalculate contextual risk scores and danger metrics for ALL vulnerabilities.
 
-    Admin only endpoint. Applies the ARCHITECTURE.md risk formula:
-    risk_score = round((cvss_score * 0.6) + ((criticality / 5 * 10) * 0.4), 2)
+    Admin only endpoint.
     """
     query = select(Vulnerability).options(selectinload(Vulnerability.asset))
     result = await db.execute(query)
@@ -39,12 +77,26 @@ async def recalculate_all_risk_scores(
     for v in vulns:
         crit = v.asset.criticality if v.asset else 3
         v.risk_score = calculate_risk_score(v.cvss_score, crit)
+
+        # Also recalculate danger metrics
+        danger_meta = evaluate_vulnerability_danger(
+            cve_id=v.cve_id,
+            cvss_score=v.cvss_score,
+            verification=v.verification.value if hasattr(v.verification, "value") else str(v.verification),
+            title=v.title,
+            description=v.description,
+        )
+        v.danger_score = danger_meta["danger_score"]
+        v.exploitability = danger_meta["exploitability"]
+        v.impact = danger_meta["impact"]
+        v.public_exploit = danger_meta["public_exploit"]
+
         updated_count += 1
 
     await db.commit()
     return RiskRecalculateResponse(
         updated_count=updated_count,
-        message=f"Successfully recomputed contextual risk scores for {updated_count} vulnerabilities.",
+        message=f"Successfully recomputed contextual risk scores and danger metrics for {updated_count} vulnerabilities.",
     )
 
 
@@ -56,10 +108,12 @@ async def list_vulnerabilities(
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     severity: Optional[VulnerabilitySeverity] = Query(None, description="Filter by severity"),
     status_filter: Optional[VulnerabilityStatus] = Query(None, alias="status", description="Filter by status"),
+    verification: Optional[VerificationType] = Query(None, description="Filter by verification type"),
+    min_danger: Optional[float] = Query(None, ge=0.0, le=10.0, description="Filter by minimum danger score"),
     asset_id: Optional[int] = Query(None, description="Filter by asset ID"),
     scan_id: Optional[int] = Query(None, description="Filter by scan ID"),
     search: Optional[str] = Query(None, description="Search by CVE ID, title, or service"),
-    sort_by: Optional[str] = Query("cvss_score", description="Sort by: cvss_score, risk_score, first_seen_at"),
+    sort_by: Optional[str] = Query("cvss_score", description="Sort by: cvss_score, risk_score, danger_score, first_seen_at"),
     order: Optional[str] = Query("desc", description="Sort direction: asc or desc"),
 ) -> VulnerabilityListResponse:
     """List detected vulnerabilities with filtering and sortable columns."""
@@ -73,6 +127,14 @@ async def list_vulnerabilities(
     if status_filter:
         query = query.where(Vulnerability.status == status_filter)
         count_query = count_query.where(Vulnerability.status == status_filter)
+
+    if verification:
+        query = query.where(Vulnerability.verification == verification)
+        count_query = count_query.where(Vulnerability.verification == verification)
+
+    if min_danger is not None:
+        query = query.where(Vulnerability.danger_score >= min_danger)
+        count_query = count_query.where(Vulnerability.danger_score >= min_danger)
 
     if asset_id:
         query = query.where(Vulnerability.asset_id == asset_id)
@@ -95,6 +157,7 @@ async def list_vulnerabilities(
     sort_column_map = {
         "cvss_score": Vulnerability.cvss_score,
         "risk_score": Vulnerability.risk_score,
+        "danger_score": Vulnerability.danger_score,
         "first_seen_at": Vulnerability.first_seen_at,
         "id": Vulnerability.id,
     }
@@ -108,32 +171,7 @@ async def list_vulnerabilities(
 
     results = (await db.execute(query)).scalars().all()
 
-    items = [
-        VulnerabilityRead(
-            id=v.id,
-            scan_id=v.scan_id,
-            asset_id=v.asset_id,
-            asset_name=v.asset.name if v.asset else f"Asset #{v.asset_id}",
-            asset_ip=v.asset.ip_address if v.asset else None,
-            asset_criticality=v.asset.criticality if v.asset else 3,
-            risk_tier=get_risk_tier(v.risk_score),
-            cve_id=v.cve_id,
-            title=v.title,
-            description=v.description,
-            cvss_score=v.cvss_score,
-            severity=v.severity,
-            port=v.port,
-            service=v.service,
-            service_version=v.service_version,
-            risk_score=v.risk_score,
-            epss_score=v.epss_score,
-            status=v.status,
-            remediation=v.remediation,
-            first_seen_at=v.first_seen_at,
-            last_seen_at=v.last_seen_at,
-        )
-        for v in results
-    ]
+    items = [_map_vuln_to_read(v) for v in results]
 
     return VulnerabilityListResponse(
         data=items,
@@ -159,29 +197,7 @@ async def get_vulnerability(
             detail=f"Vulnerability with ID {id} not found",
         )
 
-    return VulnerabilityRead(
-        id=vuln.id,
-        scan_id=vuln.scan_id,
-        asset_id=vuln.asset_id,
-        asset_name=vuln.asset.name if vuln.asset else f"Asset #{vuln.asset_id}",
-        asset_ip=vuln.asset.ip_address if vuln.asset else None,
-        asset_criticality=vuln.asset.criticality if vuln.asset else 3,
-        risk_tier=get_risk_tier(vuln.risk_score),
-        cve_id=vuln.cve_id,
-        title=vuln.title,
-        description=vuln.description,
-        cvss_score=vuln.cvss_score,
-        severity=vuln.severity,
-        port=vuln.port,
-        service=vuln.service,
-        service_version=vuln.service_version,
-        risk_score=vuln.risk_score,
-        epss_score=vuln.epss_score,
-        status=vuln.status,
-        remediation=vuln.remediation,
-        first_seen_at=vuln.first_seen_at,
-        last_seen_at=vuln.last_seen_at,
-    )
+    return _map_vuln_to_read(vuln)
 
 
 @router.patch("/{id}/status", response_model=VulnerabilityRead)
@@ -205,26 +221,4 @@ async def update_vulnerability_status(
     await db.commit()
     await db.refresh(vuln)
 
-    return VulnerabilityRead(
-        id=vuln.id,
-        scan_id=vuln.scan_id,
-        asset_id=vuln.asset_id,
-        asset_name=vuln.asset.name if vuln.asset else f"Asset #{vuln.asset_id}",
-        asset_ip=vuln.asset.ip_address if vuln.asset else None,
-        asset_criticality=vuln.asset.criticality if vuln.asset else 3,
-        risk_tier=get_risk_tier(vuln.risk_score),
-        cve_id=vuln.cve_id,
-        title=vuln.title,
-        description=vuln.description,
-        cvss_score=vuln.cvss_score,
-        severity=vuln.severity,
-        port=vuln.port,
-        service=vuln.service,
-        service_version=vuln.service_version,
-        risk_score=vuln.risk_score,
-        epss_score=vuln.epss_score,
-        status=vuln.status,
-        remediation=vuln.remediation,
-        first_seen_at=vuln.first_seen_at,
-        last_seen_at=vuln.last_seen_at,
-    )
+    return _map_vuln_to_read(vuln)

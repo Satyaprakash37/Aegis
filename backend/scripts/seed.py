@@ -14,9 +14,15 @@ from app.db.session import AsyncSessionLocal
 from app.models.user import User, UserRole
 from app.models.asset import Asset, AssetType, AssetEnvironment
 from app.models.scan import Scan, ScanType, ScanStatus
-from app.models.vulnerability import Vulnerability, VulnerabilitySeverity, VulnerabilityStatus
+from app.models.vulnerability import (
+    Vulnerability,
+    VulnerabilitySeverity,
+    VulnerabilityStatus,
+    VerificationType,
+)
 from app.core.security import hash_password
 from app.services.risk.engine import calculate_risk_score
+from app.services.risk.danger_engine import evaluate_vulnerability_danger
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("aegis.seed")
@@ -138,6 +144,17 @@ async def seed_database():
                 "criticality": 4,
                 "owner": "Backup Admin",
                 "description": "Hardened immutable storage vault for automated off-site disaster backups",
+            },
+            {
+                # Live OWASP Juice Shop vulnerable target container for live active verification deep scanning
+                "name": "owasp-juice-shop",
+                "ip_address": "172.20.0.5",
+                "hostname": "vulnerable-target",
+                "asset_type": AssetType.web,
+                "environment": AssetEnvironment.dev,
+                "criticality": 3,
+                "owner": "Security Engineering",
+                "description": "OWASP Juice Shop intentional vulnerable target for live deep vulnerability scanning and verification testing.",
             },
         ]
 
@@ -480,6 +497,22 @@ async def seed_database():
             risk_val = calculate_risk_score(v_item["cvss_score"], target_asset.criticality)
             first_seen = now - timedelta(days=v_item["days_ago"], hours=5, minutes=12)
 
+            # Determine verification type (famous CVEs get nse_verified for realism, others version_match)
+            if v_item["cve_id"] in ("CVE-2017-0144", "CVE-2014-0160", "CVE-2021-44228"):
+                ver_type = VerificationType.nse_verified
+                evidence_text = f"Nmap NSE script verification confirmed on port {v_item['port']}. Host returned vulnerable payload response signature."
+            else:
+                ver_type = VerificationType.version_match
+                evidence_text = None
+
+            danger_meta = evaluate_vulnerability_danger(
+                cve_id=v_item["cve_id"],
+                cvss_score=v_item["cvss_score"],
+                verification=ver_type.value,
+                title=v_item["title"],
+                description=v_item["description"],
+            )
+
             vuln = Vulnerability(
                 asset_id=target_asset.id,
                 scan_id=v_item["scan_id"],
@@ -494,10 +527,32 @@ async def seed_database():
                 service=v_item["service"],
                 service_version=v_item["service_version"],
                 remediation=v_item["remediation"],
+                verification=ver_type,
+                evidence=evidence_text,
+                danger_score=danger_meta["danger_score"],
+                exploitability=danger_meta["exploitability"],
+                impact=danger_meta["impact"],
+                public_exploit=danger_meta["public_exploit"],
                 first_seen_at=first_seen,
                 last_seen_at=first_seen,
             )
             session.add(vuln)
+
+        # Backfill any existing vulnerabilities in DB that lack danger metrics
+        all_existing = (await session.execute(select(Vulnerability))).scalars().all()
+        for ev in all_existing:
+            if ev.danger_score is None:
+                d_meta = evaluate_vulnerability_danger(
+                    cve_id=ev.cve_id,
+                    cvss_score=ev.cvss_score,
+                    verification=ev.verification.value if hasattr(ev.verification, "value") else str(ev.verification),
+                    title=ev.title,
+                    description=ev.description,
+                )
+                ev.danger_score = d_meta["danger_score"]
+                ev.exploitability = d_meta["exploitability"]
+                ev.impact = d_meta["impact"]
+                ev.public_exploit = d_meta["public_exploit"]
 
         await session.commit()
         logger.info("[AEGIS SEED] Database seeding completed successfully!")

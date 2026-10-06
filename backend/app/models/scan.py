@@ -18,6 +18,7 @@ class ScanType(str, enum.Enum):
     """Scan execution depth."""
     quick = "quick"
     full = "full"
+    deep = "deep"
 
 
 class ScanStatus(str, enum.Enum):

@@ -162,3 +162,61 @@ export function ReportFormatBadge({ format }) {
     </span>
   );
 }
+
+export function VerificationBadge({ verification }) {
+  const v = String(verification || 'version_match').toLowerCase();
+  if (v === 'nuclei_verified') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-blue-500/15 text-blue-300 border-blue-500/30 shadow-[0_0_8px_rgba(59,130,246,0.15)]">
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+        Nuclei Verified ✓
+      </span>
+    );
+  }
+  if (v === 'nse_verified') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-emerald-500/15 text-emerald-300 border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        NSE Verified ✓
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-slate-800 text-slate-400 border-slate-700">
+      Version Match
+    </span>
+  );
+}
+
+export function DangerScoreBadge({ score, showBar = true }) {
+  const num = Number(score) || 0;
+  let bg = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+  let barColor = 'bg-emerald-500';
+
+  if (num > 8.0) {
+    bg = 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+    barColor = 'bg-rose-500';
+  } else if (num > 6.0) {
+    bg = 'bg-orange-500/15 text-orange-400 border-orange-500/30';
+    barColor = 'bg-orange-500';
+  } else if (num > 3.0) {
+    bg = 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+    barColor = 'bg-amber-500';
+  }
+
+  const pct = Math.min(100, Math.max(0, num * 10));
+
+  return (
+    <div className="inline-flex flex-col gap-1 min-w-[50px]">
+      <div className={`inline-flex items-center justify-center px-2 py-0.5 rounded text-xs font-mono font-bold border ${bg}`}>
+        <span>{num.toFixed(2)}</span>
+      </div>
+      {showBar && (
+        <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
+          <div className={`h-full ${barColor} transition-all duration-300`} style={{ width: `${pct}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+

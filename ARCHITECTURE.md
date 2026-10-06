@@ -59,7 +59,7 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 ### `scans`
 - `id` (PK, UUID / Integer)
 - `asset_id` (FK -> `assets.id`)
-- `scan_type` (Enum: `quick`, `full`)
+- `scan_type` (Enum: `quick`, `full`, `deep`)
 - `status` (Enum: `pending`, `running`, `completed`, `failed`)
 - `started_at` (Timestamp with timezone, Nullable)
 - `completed_at` (Timestamp with timezone, Nullable)
@@ -84,6 +84,12 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 - `remediation` (Text, Nullable)
 - `first_seen_at` (Timestamp with timezone)
 - `last_seen_at` (Timestamp with timezone)
+- `verification` (Enum: `version_match`, `nse_verified`, `nuclei_verified`, default `version_match`)
+- `evidence` (Text, Nullable - raw HTTP/NSE payload proof)
+- `danger_score` (Float, Nullable - composite 0-10 metric)
+- `exploitability` (Text, Nullable - ease and method of exploitation narrative)
+- `impact` (Text, Nullable - blast radius and consequence narrative)
+- `public_exploit` (Boolean, default `False` - known public exploit weaponization)
 
 ### `reports`
 - `id` (PK, UUID / Integer)
@@ -95,18 +101,58 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 
 ---
 
-## 4. Risk Prioritization Engine
+## 4. Prioritization & Threat Assessment Engines
 
-### Calculation Logic
+### A. Contextual Risk Engine
+Prioritizes CVEs within the organization's business context:
 $$\text{criticality\_weight} = \left(\frac{\text{criticality}}{5}\right) \times 10$$
 $$\text{risk\_score} = \text{round}\left((\text{cvss\_score} \times 0.6) + (\text{criticality\_weight} \times 0.4), 2\right)$$
 
-### Severity Auto-Mapping from CVSS
+### B. Danger Assessment Engine (Phase 8)
+Assesses weaponization and real-world hazard beyond static version claims:
+$$\text{danger\_score} = \text{round}\left((\text{cvss\_score} \times 0.40) + (\text{exploit\_ease} \times 0.35) + (\text{impact\_severity} \times 0.25), 2\right)$$
+- **Exploit Ease (0-10):** Measured by public weaponization, Metasploit integration, active remote execution vs local interaction.
+- **Impact Severity (0-10):** RCE/root access (10.0), SQLi/Auth Bypass (8.0-9.0), Info Leak (4.0-6.0), DoS (3.0-5.0).
+- **Public Exploit:** Flagged with 🔥 when active PoC or weaponized module is identified.
+
+### C. Severity Auto-Mapping from CVSS
 - **Critical:** CVSS $\ge 9.0$
 - **High:** $7.0 \le \text{CVSS} \le 8.9$
 - **Medium:** $4.0 \le \text{CVSS} \le 6.9$
 - **Low:** $0.1 \le \text{CVSS} \le 3.9$
 - **None:** $\text{CVSS} = 0.0$
+
+---
+
+## 5. Deep Active Verification Architecture (Phase 8)
+
+Deep scanning moves beyond probabilistic banner matching to active, evidence-backed proof of exploitability using a 3-stage pipeline:
+
+```
+[Target Asset IP]
+       │
+       ▼
+ Stage 1: Fast Service Discovery
+   • Nmap -sV -T4 --top-ports 500
+   • Rapid port & service fingerprinting
+       │
+       ▼
+ Stage 2: Nmap NSE Script Engine
+   • nmap -sV --script vuln -p <discovered_ports>
+   • Actively tests MS17-010, Heartbleed, Log4Shell, etc.
+   • Sets verification = nse_verified, captures raw output evidence
+       │
+       ▼
+ Stage 3: Nuclei Dynamic Testing
+   • ProjectDiscovery Nuclei v3 execution
+   • Streaming JSONL output against open web/API ports (-t /nuclei-templates)
+   • Sets verification = nuclei_verified, extracts HTTP matched-at & proof
+       │
+       ▼
+ Deduplication & Risk Pipeline
+   • In-place upgrades: (asset_id, cve_id, port) upgraded from version_match to verified
+   • Contextual risk & Danger scores computed automatically
+```
 
 ---
 
@@ -179,6 +225,7 @@ $$\text{risk\_score} = \text{round}\left((\text{cvss\_score} \times 0.6) + (\tex
 - **Phase 5:** Contextual Risk Engine + Vulnerabilities management page + Dashboard charts.
 - **Phase 6:** Report generation engine (PDF/Excel) + Reports UI.
 - **Phase 7:** Platform polish, database seeding script, comprehensive documentation & testing.
+- **Phase 8:** Deep Active Vulnerability Scanning + Active Verification Engine (Nmap NSE + Nuclei v3) + Threat Danger Assessment Engine.
 
 ---
 

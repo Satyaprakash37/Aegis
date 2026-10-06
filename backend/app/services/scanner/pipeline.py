@@ -1,7 +1,7 @@
 """Scan Execution Pipeline.
 
-Coordinates the Nmap port scanning engine, NVD API enrichment,
-vulnerability deduplication, and database persistence.
+Coordinates the Nmap port scanning engine, NSE vulnerability scripts, Nuclei active
+verification, NVD API enrichment, danger assessment, deduplication, and database persistence.
 """
 
 from datetime import datetime, timezone
@@ -12,17 +12,24 @@ from sqlalchemy.orm import selectinload
 
 from app.db.session import AsyncSessionLocal
 from app.models.asset import Asset
-from app.models.scan import Scan, ScanStatus
-from app.models.vulnerability import Vulnerability, VulnerabilitySeverity, VulnerabilityStatus
+from app.models.scan import Scan, ScanStatus, ScanType
+from app.models.vulnerability import (
+    Vulnerability,
+    VulnerabilitySeverity,
+    VulnerabilityStatus,
+    VerificationType,
+)
 from app.services.enricher.nvd_client import nvd_client
 from app.services.risk.engine import calculate_risk_score
+from app.services.risk.danger_engine import evaluate_vulnerability_danger
 from app.services.scanner.nmap_runner import ScanExecutionError, run_nmap_scan
+from app.services.scanner.deep_scanner import run_deep_scan
 
 logger = logging.getLogger("aegis.pipeline")
 
 
 async def execute_scan_pipeline(scan_id: int) -> None:
-    """Execute scan and enrichment asynchronously in the background."""
+    """Execute scan, active verification, and enrichment asynchronously."""
     async with AsyncSessionLocal() as db:
         # Load scan and target asset
         scan_query = select(Scan).options(selectinload(Scan.asset)).where(Scan.id == scan_id)
@@ -43,40 +50,130 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             return
 
         try:
-            # Transition scan status to running
-            logger.info(f"Initiating pipeline for Scan #{scan.id} on asset {asset.name} ({asset.ip_address})")
+            logger.info(f"Initiating pipeline for Scan #{scan.id} (type: {scan.scan_type.value}) on {asset.name} ({asset.ip_address})")
             scan.status = ScanStatus.running
             scan.started_at = datetime.now(timezone.utc)
             await db.commit()
 
-            # Execute Nmap scan in worker thread
-            ports: List[Dict[str, Any]] = await run_nmap_scan(
-                ip_address=asset.ip_address,
-                scan_type=scan.scan_type.value,
+            is_deep = scan.scan_type == ScanType.deep or scan.scan_type.value == "deep"
+            active_verified_findings: List[Dict[str, Any]] = []
+
+            if is_deep:
+                # Execute three-stage deep scan
+                ports, active_verified_findings = await run_deep_scan(asset.ip_address)
+            else:
+                # Execute standard Nmap port scan (quick or full)
+                ports = await run_nmap_scan(
+                    ip_address=asset.ip_address,
+                    scan_type=scan.scan_type.value,
+                )
+
+            # Record initial raw output
+            stage_names = (
+                [
+                    "Stage 1: Nmap Service Discovery (top 500 ports)",
+                    "Stage 2: Nmap NSE Script Active Scanning",
+                    "Stage 3: Nuclei Dynamic Active Verification",
+                ]
+                if is_deep
+                else [f"Nmap Port & Service Fingerprinting ({scan.scan_type.value})"]
             )
 
-            # Persist raw port scan telemetry
             scan.raw_output = {
                 "target_ip": asset.ip_address,
                 "target_hostname": asset.hostname,
                 "scan_type": scan.scan_type.value,
                 "ports_discovered": len(ports),
                 "ports": ports,
+                "stages": stage_names,
+                "active_verified_count": len(active_verified_findings),
             }
             await db.commit()
 
-            # If no open ports were identified, complete scan cleanly
-            if not ports:
-                logger.info(f"Scan #{scan.id} finished: no open ports found on {asset.ip_address}")
-                scan.status = ScanStatus.completed
-                scan.completed_at = datetime.now(timezone.utc)
-                scan.total_vulns_found = 0
-                await db.commit()
-                return
-
-            # Enrich discovered open ports with NVD CVE telemetry
             total_vulns = 0
+            verification_counts = {
+                "version_match": 0,
+                "nse_verified": 0,
+                "nuclei_verified": 0,
+            }
 
+            now_utc = datetime.now(timezone.utc)
+
+            # 1. Process actively verified findings first (highest confidence)
+            for v_finding in active_verified_findings:
+                cve_id = v_finding["cve_id"]
+                port_num = v_finding.get("port")
+                v_type = v_finding.get("verification", VerificationType.nse_verified.value)
+                cvss_score = float(v_finding.get("cvss_score", 7.5))
+                evidence = v_finding.get("evidence", "")
+                title = v_finding.get("title", cve_id)
+                description = v_finding.get("description", title)
+                severity_enum = v_finding.get("severity", VulnerabilitySeverity.high)
+
+                # Check for existing vulnerability to deduplicate / upgrade
+                dup_query = select(Vulnerability).where(
+                    Vulnerability.asset_id == asset.id,
+                    Vulnerability.cve_id == cve_id,
+                    Vulnerability.port == port_num,
+                )
+                dup_result = await db.execute(dup_query)
+                existing_vuln: Optional[Vulnerability] = dup_result.scalar_one_or_none()
+
+                danger_meta = evaluate_vulnerability_danger(
+                    cve_id=cve_id,
+                    cvss_score=cvss_score,
+                    verification=v_type,
+                    title=title,
+                    description=description,
+                )
+
+                risk_score = calculate_risk_score(cvss_score, asset.criticality)
+
+                if existing_vuln:
+                    # Upgrade verification level and update evidence/danger
+                    existing_vuln.verification = VerificationType(v_type)
+                    existing_vuln.evidence = evidence
+                    existing_vuln.danger_score = danger_meta["danger_score"]
+                    existing_vuln.exploitability = danger_meta["exploitability"]
+                    existing_vuln.impact = danger_meta["impact"]
+                    existing_vuln.public_exploit = danger_meta["public_exploit"]
+                    existing_vuln.risk_score = risk_score
+                    existing_vuln.last_seen_at = now_utc
+                    existing_vuln.scan_id = scan.id
+                    if existing_vuln.status == VulnerabilityStatus.mitigated:
+                        existing_vuln.status = VulnerabilityStatus.open
+                else:
+                    new_vuln = Vulnerability(
+                        scan_id=scan.id,
+                        asset_id=asset.id,
+                        cve_id=cve_id,
+                        title=title[:255],
+                        description=description,
+                        cvss_score=cvss_score,
+                        severity=severity_enum,
+                        port=port_num,
+                        service=None,
+                        service_version=None,
+                        risk_score=risk_score,
+                        epss_score=None,
+                        status=VulnerabilityStatus.open,
+                        remediation="Apply official security patch or mitigation playbook immediately.",
+                        verification=VerificationType(v_type),
+                        evidence=evidence,
+                        danger_score=danger_meta["danger_score"],
+                        exploitability=danger_meta["exploitability"],
+                        impact=danger_meta["impact"],
+                        public_exploit=danger_meta["public_exploit"],
+                        first_seen_at=now_utc,
+                        last_seen_at=now_utc,
+                    )
+                    db.add(new_vuln)
+
+                await db.commit()
+                total_vulns += 1
+                verification_counts[v_type] = verification_counts.get(v_type, 0) + 1
+
+            # 2. Enrich discovered open ports with NVD CVE telemetry (version match)
             for port_info in ports:
                 product = port_info.get("product")
                 service = port_info.get("service")
@@ -84,7 +181,6 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                 port_num = port_info.get("port")
                 cpe = port_info.get("cpe")
 
-                # Skip enrichment if port has no identifiable service info
                 if not product and not service:
                     continue
 
@@ -105,30 +201,41 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                     except ValueError:
                         severity_enum = VulnerabilitySeverity.none
 
-                    # Deduplication check: check if (asset_id, cve_id, port) already recorded
+                    # Deduplication check
                     dup_query = select(Vulnerability).where(
                         Vulnerability.asset_id == asset.id,
                         Vulnerability.cve_id == cve_id,
                         Vulnerability.port == port_num,
                     )
                     dup_result = await db.execute(dup_query)
-                    existing_vuln: Optional[Vulnerability] = dup_result.scalar_one_or_none()
+                    existing_vuln = dup_result.scalar_one_or_none()
 
-                    now_utc = datetime.now(timezone.utc)
+                    danger_meta = evaluate_vulnerability_danger(
+                        cve_id=cve_id,
+                        cvss_score=cvss_score,
+                        verification=VerificationType.version_match.value,
+                        title=cve_id,
+                        description=cve.get("description", ""),
+                    )
+
+                    risk_score = calculate_risk_score(cvss_score, asset.criticality)
 
                     if existing_vuln:
-                        # If finding exists and is not marked as mitigated, refresh last_seen_at
-                        if existing_vuln.status != VulnerabilityStatus.mitigated:
-                            existing_vuln.last_seen_at = now_utc
-                            existing_vuln.scan_id = scan.id
-                            await db.commit()
-                            total_vulns += 1
+                        # If existing finding was version match, update danger fields
+                        if existing_vuln.verification == VerificationType.version_match:
+                            existing_vuln.danger_score = danger_meta["danger_score"]
+                            existing_vuln.exploitability = danger_meta["exploitability"]
+                            existing_vuln.impact = danger_meta["impact"]
+                            existing_vuln.public_exploit = danger_meta["public_exploit"]
+                        existing_vuln.last_seen_at = now_utc
+                        existing_vuln.scan_id = scan.id
+                        await db.commit()
+                        total_vulns += 1
+                        verification_counts[existing_vuln.verification.value] = (
+                            verification_counts.get(existing_vuln.verification.value, 0) + 1
+                        )
                     else:
                         title = f"{cve_id}: {cve['description'][:80]}..." if cve.get("description") else cve_id
-
-                        # Calculate contextual risk score using asset criticality weighting
-                        risk_score = calculate_risk_score(cvss_score, asset.criticality)
-
                         new_vuln = Vulnerability(
                             scan_id=scan.id,
                             asset_id=asset.id,
@@ -144,19 +251,33 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                             epss_score=None,
                             status=VulnerabilityStatus.open,
                             remediation="Review vendor security advisories and update to the latest patched software version.",
+                            verification=VerificationType.version_match,
+                            evidence=None,
+                            danger_score=danger_meta["danger_score"],
+                            exploitability=danger_meta["exploitability"],
+                            impact=danger_meta["impact"],
+                            public_exploit=danger_meta["public_exploit"],
                             first_seen_at=now_utc,
                             last_seen_at=now_utc,
                         )
                         db.add(new_vuln)
                         await db.commit()
                         total_vulns += 1
+                        verification_counts["version_match"] += 1
 
-            # Mark scan completed successfully
+            # Update final scan record with breakdown
+            raw_out = scan.raw_output or {}
+            raw_out["verification_breakdown"] = verification_counts
+            scan.raw_output = raw_out
             scan.status = ScanStatus.completed
             scan.completed_at = datetime.now(timezone.utc)
             scan.total_vulns_found = total_vulns
             await db.commit()
-            logger.info(f"Scan #{scan.id} completed successfully. Identified {total_vulns} vulnerability finding(s).")
+
+            logger.info(
+                f"Scan #{scan.id} completed successfully. Identified {total_vulns} finding(s) "
+                f"(Breakdown: {verification_counts})."
+            )
 
         except ScanExecutionError as see:
             logger.warning(f"Scan #{scan.id} execution failed: {see}")

@@ -10,11 +10,12 @@
 
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT" /></a>
-  <a href="#architecture"><img src="https://img.shields.io/badge/version-v1.0.0-emerald.svg?style=flat-square" alt="Version 1.0.0" /></a>
+  <a href="#architecture"><img src="https://img.shields.io/badge/version-v1.1.0-emerald.svg?style=flat-square" alt="Version 1.1.0" /></a>
   <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.110+-009688.svg?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" /></a>
   <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18.3+-61DAFB.svg?style=flat-square&logo=react&logoColor=black" alt="React" /></a>
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1.svg?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL" /></a>
   <a href="https://nmap.org/"><img src="https://img.shields.io/badge/Nmap-7.93+-blue.svg?style=flat-square&logo=linux&logoColor=white" alt="Nmap" /></a>
+  <a href="https://github.com/projectdiscovery/nuclei"><img src="https://img.shields.io/badge/Nuclei-v3.3.8-yellow.svg?style=flat-square&logo=target&logoColor=black" alt="Nuclei v3" /></a>
   <a href="https://docker.com/"><img src="https://img.shields.io/badge/Docker-Multi--Container-2496ED.svg?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/TailwindCSS-3.4+-38B2AC.svg?style=flat-square&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
 </p>
@@ -65,9 +66,19 @@ Dark SOC theme with JWT role-based access control, account lockout protection, a
 
 ## Core Capabilities
 
-- **Automated Network Port & Service Discovery:** Asynchronous Nmap engine executing Quick (top 100 ports) and Full (ports 1-1000) scans in non-blocking worker threads.
+- **Deep Active Vulnerability Verification (Phase 8):**
+  - **Stage 1 (Port & Service Sweep):** Fast discovery across top 500 ports using `-T4 -sV`.
+  - **Stage 2 (Nmap NSE Active Audits):** Targets discovered services with the Nmap Scripting Engine (`--script vuln`) to actively verify exploits like MS17-010, BlueKeep, and Heartbleed, capturing raw output proof.
+  - **Stage 3 (Nuclei v3 Dynamic Exploitation):** Executes ProjectDiscovery Nuclei v3 streaming against exposed web/API endpoints with baked-in vulnerability templates, extracting HTTP match telemetry and proof-of-concept indicators.
+  - **In-Place Upgrades:** Re-scans upgrade findings from `version_match` to `nse_verified` or `nuclei_verified` without creating duplicate CVE records.
+- **Threat Danger Assessment Engine:**
+  - Evaluates ease of exploitation (weaponized public exploit, Metasploit integration, remote vs local).
+  - Assesses blast radius and threat impact (Remote Code Execution, Privilege Escalation, SQLi, Authentication Bypass, Information Disclosure).
+  - Flags weaponized exploits with 🔥 in tables and SOC dashboards.
+- **Automated Network Port & Service Discovery:** Asynchronous Nmap engine executing Quick (top 100 ports), Full (ports 1-1000), and Deep (active proof) scans in non-blocking worker threads.
 - **Threat Intelligence Enrichment:** Seamless NVD API 2.0 integration correlating CPE banners, service names, and versions directly to official CVE records with CVSS v3.1 scores.
 - **Contextual Composite Risk Engine:** Eliminates alert fatigue by weighting technical severity against organizational asset criticality.
+- **Pre-Configured Testbed (OWASP Juice Shop):** Bundles a dedicated vulnerable test target (`aegis-juice-shop` on port 3001) for safe, authorized active vulnerability verification out of the box.
 - **Compliance & Audit Deliverables:**
   - **Executive Risk Briefing (PDF):** Designed for executive leadership with risk posture summaries, metrics, and top 10 exposures.
   - **Detailed Technical Audit (PDF):** Full host dossiers with CVE descriptions, CVSS breakdowns, and remediation instructions.
@@ -81,13 +92,18 @@ Dark SOC theme with JWT role-based access control, account lockout protection, a
 
 ---
 
-## Contextual Risk Scoring Algorithm
+## Scoring Algorithms
 
-Traditional vulnerability management relies solely on raw CVSS scores, leading teams to patch low-impact vulnerabilities on test boxes while ignoring high-risk flaws on crown-jewel databases. AEGIS calculates a **Contextual Risk Score**:
-
+### 1. Contextual Risk Score (Business Impact)
+Traditional vulnerability management relies solely on raw CVSS scores, leading teams to patch low-impact vulnerabilities on test boxes while ignoring high-risk flaws on crown-jewel databases:
 $$\text{Asset Criticality Weight} = \left(\frac{\text{Criticality}}{5}\right) \times 10$$
-
 $$\text{Risk Score} = \text{round}\left((\text{CVSS Base Score} \times 0.6) + (\text{Asset Criticality Weight} \times 0.4), 2\right)$$
+
+### 2. Threat Danger Score (Real-World Exploitability)
+Beyond business criticality, the Danger Assessment Engine evaluates actual exploitation hazard:
+$$\text{Danger Score} = \text{round}\left((\text{CVSS Base Score} \times 0.40) + (\text{Exploit Ease} \times 0.35) + (\text{Impact Severity} \times 0.25), 2\right)$$
+- **Exploit Ease (0-10):** Measures whether exploit code is public, weaponized in frameworks (Metasploit, Nuclei), or requires authenticated complex chaining.
+- **Impact Severity (0-10):** Measures catastrophic potential (RCE = 10, Auth Bypass/SQLi = 8-9, Data Leak = 4-6, DoS = 3-5).
 
 ### Risk Tier Classifications
 
@@ -162,14 +178,15 @@ All protected endpoints require a valid Bearer JWT token in the `Authorization` 
 | `GET` | `/api/assets/{id}` | Authenticated | Get asset details with severity breakdown |
 | `PUT` | `/api/assets/{id}` | Admin, Analyst | Update asset parameters and criticality |
 | `DELETE`| `/api/assets/{id}` | Admin | Delete asset and cascade associated vulnerabilities |
-| `POST` | `/api/scans` | Admin, Analyst | Launch quick or full Nmap scan job |
+| `POST` | `/api/scans` | Admin, Analyst | Launch quick, full, or deep active scan job |
 | `GET` | `/api/scans` | Authenticated | List historical scans with status and findings |
 | `GET` | `/api/scans/{id}` | Authenticated | Get scan run status and raw port execution telemetry |
-| `GET` | `/api/vulns` | Authenticated | Paginated vulnerabilities filtered and sorted by risk |
-| `GET` | `/api/vulns/{id}` | Authenticated | Get full vulnerability detail dossier |
+| `GET` | `/api/vulns` | Authenticated | Paginated vulnerabilities with `?verification=` and `?min_danger=` filters |
+| `GET` | `/api/vulns/{id}` | Authenticated | Get full vulnerability detail dossier with evidence and danger metrics |
 | `PATCH`| `/api/vulns/{id}/status` | Admin, Analyst | Update remediation lifecycle (`open`, `in_progress`, `mitigated`) |
 | `POST` | `/api/vulns/recalculate-risk` | Admin | Batch recalculate composite risk scores across all assets |
-| `GET` | `/api/dashboard/summary` | Authenticated | Top-level KPI summary cards |
+| `GET` | `/api/dashboard/summary` | Authenticated | Top-level KPI summary cards including verified dangerous count |
+| `GET` | `/api/dashboard/top-dangerous-vulns` | Authenticated | Top 5 dangerous vulnerabilities ranked by composite danger score |
 | `GET` | `/api/dashboard/severity-distribution` | Authenticated | Severity counts for donut chart |
 | `GET` | `/api/dashboard/trend` | Authenticated | 30-day vulnerability discovery velocity |
 | `GET` | `/api/dashboard/top-risky-assets` | Authenticated | Top vulnerable assets ordered by critical/high count |

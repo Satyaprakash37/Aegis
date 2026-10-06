@@ -17,10 +17,20 @@ import {
   RefreshCw,
   Cpu,
   Layers,
-  CheckCircle2
+  CheckCircle2,
+  Flame,
+  Zap,
+  Terminal,
+  AlertTriangle
 } from 'lucide-react';
 import api from '../api/client';
-import { SeverityBadge, VulnStatusBadge, RiskTierBadge } from '../components/Badge';
+import { 
+  SeverityBadge, 
+  VulnStatusBadge, 
+  RiskTierBadge,
+  VerificationBadge,
+  DangerScoreBadge 
+} from '../components/Badge';
 import Toast from '../components/Toast';
 
 export default function Vulnerabilities() {
@@ -38,6 +48,8 @@ export default function Vulnerabilities() {
   const [search, setSearch] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [verificationFilter, setVerificationFilter] = useState('');
+  const [minDangerFilter, setMinDangerFilter] = useState('');
   const [sortBy, setSortBy] = useState('risk_score');
   const [order, setOrder] = useState('desc');
 
@@ -63,6 +75,8 @@ export default function Vulnerabilities() {
       if (search) params.search = search;
       if (severityFilter) params.severity = severityFilter;
       if (statusFilter) params.status = statusFilter;
+      if (verificationFilter) params.verification = verificationFilter;
+      if (minDangerFilter) params.min_danger = parseFloat(minDangerFilter);
       if (scanIdParam) params.scan_id = parseInt(scanIdParam, 10);
 
       const res = await api.get('/api/vulns', { params });
@@ -73,7 +87,7 @@ export default function Vulnerabilities() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, severityFilter, statusFilter, scanIdParam, sortBy, order]);
+  }, [page, pageSize, search, severityFilter, statusFilter, verificationFilter, minDangerFilter, scanIdParam, sortBy, order]);
 
   useEffect(() => {
     fetchVulns();
@@ -235,6 +249,36 @@ export default function Vulnerabilities() {
           <option value="low">Low (0.1 - 3.9)</option>
         </select>
 
+        {/* Verification Filter */}
+        <select
+          value={verificationFilter}
+          onChange={(e) => {
+            setVerificationFilter(e.target.value);
+            setPage(1);
+          }}
+          className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-cyan-500 transition-colors font-mono"
+        >
+          <option value="">All Verifications</option>
+          <option value="nuclei_verified">Nuclei Verified (Active)</option>
+          <option value="nse_verified">NSE Verified (Active)</option>
+          <option value="version_match">Version Match</option>
+        </select>
+
+        {/* Min Danger Filter */}
+        <select
+          value={minDangerFilter}
+          onChange={(e) => {
+            setMinDangerFilter(e.target.value);
+            setPage(1);
+          }}
+          className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-cyan-500 transition-colors font-mono"
+        >
+          <option value="">All Danger Levels</option>
+          <option value="8.0">Critical Danger (≥ 8.0)</option>
+          <option value="6.0">High Danger (≥ 6.0)</option>
+          <option value="4.0">Medium Danger (≥ 4.0)</option>
+        </select>
+
         {/* Status Filter */}
         <select
           value={statusFilter}
@@ -259,12 +303,22 @@ export default function Vulnerabilities() {
             <thead>
               <tr className="border-b border-slate-800/80 bg-slate-950 text-slate-400 font-mono text-[11px] uppercase tracking-wider select-none">
                 <th className="py-3 px-4">CVE ID</th>
+                <th className="py-3 px-4">Verification</th>
+                <th 
+                  className="py-3 px-4 cursor-pointer hover:text-slate-200 transition-colors"
+                  onClick={() => handleSort('danger_score')}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Danger</span>
+                    {renderSortIcon('danger_score')}
+                  </div>
+                </th>
                 <th 
                   className="py-3 px-4 cursor-pointer hover:text-slate-200 transition-colors"
                   onClick={() => handleSort('risk_score')}
                 >
                   <div className="flex items-center gap-1.5">
-                    <span>Contextual Risk</span>
+                    <span>Risk Score</span>
                     {renderSortIcon('risk_score')}
                   </div>
                 </th>
@@ -273,7 +327,7 @@ export default function Vulnerabilities() {
                   onClick={() => handleSort('cvss_score')}
                 >
                   <div className="flex items-center gap-1.5">
-                    <span>Base CVSS</span>
+                    <span>CVSS</span>
                     {renderSortIcon('cvss_score')}
                   </div>
                 </th>
@@ -298,6 +352,8 @@ export default function Vulnerabilities() {
                   <tr key={i} className="animate-pulse">
                     <td className="py-3.5 px-4"><div className="h-4 w-28 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-16 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-12 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-20 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-32 bg-slate-800 rounded" /></td>
@@ -308,7 +364,7 @@ export default function Vulnerabilities() {
                 ))
               ) : vulns.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500">
+                  <td colSpan={10} className="py-12 text-center text-slate-500">
                     <ShieldAlert className="w-8 h-8 mx-auto mb-2 text-slate-600 opacity-50" />
                     <p className="font-medium text-slate-400">No vulnerabilities recorded</p>
                     <p className="text-xs text-slate-600 mt-0.5">
@@ -324,8 +380,25 @@ export default function Vulnerabilities() {
                     className="hover:bg-slate-900/40 transition-colors cursor-pointer group"
                   >
                     {/* CVE ID */}
-                    <td className="py-3.5 px-4 font-mono font-bold text-cyan-400 group-hover:text-cyan-300">
-                      {v.cve_id}
+                    <td className="py-3.5 px-4 font-mono font-bold text-cyan-400 group-hover:text-cyan-300 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span>{v.cve_id}</span>
+                        {v.public_exploit && (
+                          <span title="Known public exploit available in the wild" className="text-sm cursor-help">
+                            🔥
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Verification */}
+                    <td className="py-3.5 px-4">
+                      <VerificationBadge verification={v.verification} />
+                    </td>
+
+                    {/* Danger Score */}
+                    <td className="py-3.5 px-4">
+                      <DangerScoreBadge score={v.danger_score} />
                     </td>
 
                     {/* Contextual Risk Score */}
@@ -335,7 +408,7 @@ export default function Vulnerabilities() {
 
                     {/* CVSS Score */}
                     <td className="py-3.5 px-4 font-mono font-bold text-white">
-                      {v.cvss_score.toFixed(1)}
+                      {Number(v.cvss_score || 0).toFixed(1)}
                     </td>
 
                     {/* Severity */}
@@ -440,23 +513,40 @@ export default function Vulnerabilities() {
       {/* Vulnerability Detail Drawer / Modal */}
       {selectedVuln && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
             {/* Header */}
             <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-4 bg-slate-950/80">
               <div>
-                <div className="flex items-center gap-2.5">
-                  <h3 className="text-lg font-bold text-white font-mono">
-                    {selectedVuln.cve_id}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h3 className="text-lg font-bold text-white font-mono flex items-center gap-1.5">
+                    <span>{selectedVuln.cve_id}</span>
+                    {selectedVuln.public_exploit && (
+                      <span title="Known public exploit available in the wild" className="text-sm">🔥</span>
+                    )}
                   </h3>
                   <SeverityBadge severity={selectedVuln.severity} />
+                  <VerificationBadge verification={selectedVuln.verification} />
                   <VulnStatusBadge status={selectedVuln.status} />
+                  {selectedVuln.public_exploit && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                      Public Exploit Available
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-center gap-3 mt-1.5">
-                  <span className="text-xs text-slate-400 font-mono">
-                    Contextual Risk: <span className="text-cyan-400 font-bold">{selectedVuln.risk_score.toFixed(2)}</span>
+                <div className="flex flex-wrap items-center gap-3 mt-2 text-xs font-mono text-slate-400">
+                  <span>
+                    Danger Score:{' '}
+                    <span className="text-rose-400 font-bold">
+                      {selectedVuln.danger_score != null ? Number(selectedVuln.danger_score).toFixed(2) : 'N/A'}
+                    </span>
                   </span>
-                  <span className="text-xs text-slate-400 font-mono">
-                    Base CVSS: <span className="text-white font-bold">{selectedVuln.cvss_score.toFixed(1)}</span>
+                  <span>·</span>
+                  <span>
+                    Contextual Risk: <span className="text-cyan-400 font-bold">{Number(selectedVuln.risk_score || 0).toFixed(2)}</span>
+                  </span>
+                  <span>·</span>
+                  <span>
+                    Base CVSS: <span className="text-white font-bold">{Number(selectedVuln.cvss_score || 0).toFixed(1)}</span>
                   </span>
                 </div>
               </div>
@@ -471,6 +561,66 @@ export default function Vulnerabilities() {
 
             {/* Body */}
             <div className="p-6 space-y-5 overflow-y-auto">
+              {/* Danger Assessment Engine Card */}
+              <div className="p-4 rounded-xl bg-gradient-to-b from-rose-950/20 via-slate-950 to-slate-950 border border-rose-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-mono font-semibold text-rose-300 uppercase tracking-wider">
+                    <Flame className="w-4 h-4 text-rose-400 fill-rose-500/30" />
+                    <span>Danger Assessment Engine (CVSS 40% + Exploit 35% + Impact 25%)</span>
+                  </div>
+                  <DangerScoreBadge score={selectedVuln.danger_score} showBar={false} />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-slate-900/70 border border-slate-800">
+                    <span className="text-slate-400 font-mono uppercase text-[10px] block mb-1 flex items-center gap-1 font-semibold">
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      Exploitability Assessment
+                    </span>
+                    <p className="text-slate-300 font-sans leading-relaxed text-[11px]">
+                      {selectedVuln.exploitability || "Identified via banner correlation. No active exploitation confirmed."}
+                    </p>
+                    {selectedVuln.public_exploit && (
+                      <div className="mt-2 text-[10px] font-mono text-rose-400 flex items-center gap-1 font-semibold">
+                        <span>🔥 Public exploit weaponization verified</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-900/70 border border-slate-800">
+                    <span className="text-slate-400 font-mono uppercase text-[10px] block mb-1 flex items-center gap-1 font-semibold">
+                      <AlertTriangle className="w-3 h-3 text-rose-400" />
+                      Impact & Blast Radius
+                    </span>
+                    <p className="text-slate-300 font-sans leading-relaxed text-[11px]">
+                      {selectedVuln.impact || "Standard system security boundary impact."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Verification Evidence & Proof */}
+              <div>
+                <h4 className="text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Active Verification Evidence & Raw Output</span>
+                  </div>
+                  <VerificationBadge verification={selectedVuln.verification} />
+                </h4>
+                {selectedVuln.evidence ? (
+                  <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800">
+                    <pre className="text-emerald-400 font-mono text-xs overflow-x-auto whitespace-pre-wrap leading-relaxed select-text font-medium">
+                      <code>{selectedVuln.evidence}</code>
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 text-xs text-slate-500 font-sans leading-relaxed">
+                    No active dynamic evidence payload captured. This finding was matched from service version headers. Run a <span className="text-emerald-400 font-mono font-medium">Deep Scan</span> on this asset to execute active verification.
+                  </div>
+                )}
+              </div>
+
               {/* Risk Score Calculation Breakdown Card */}
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800/80 space-y-3">
                 <div className="flex items-center justify-between">

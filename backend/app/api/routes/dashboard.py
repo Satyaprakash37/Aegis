@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List
 from fastapi import APIRouter, Depends
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, literal_column, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -12,7 +12,12 @@ from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.scan import Scan
 from app.models.user import User
-from app.models.vulnerability import Vulnerability, VulnerabilitySeverity, VulnerabilityStatus
+from app.models.vulnerability import (
+    VerificationType,
+    Vulnerability,
+    VulnerabilitySeverity,
+    VulnerabilityStatus,
+)
 from app.services.risk.engine import get_risk_tier
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -60,6 +65,17 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
+    # Verified Dangerous Vulns (danger_score > 6 + verified active)
+    verified_dangerous_count = (
+        await db.execute(
+            select(func.count(Vulnerability.id)).where(
+                Vulnerability.danger_score > 6.0,
+                Vulnerability.verification.in_([VerificationType.nse_verified, VerificationType.nuclei_verified]),
+                Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
+            )
+        )
+    ).scalar_one()
+
     # Scans run in last 30 days
     scans_30d = (
         await db.execute(
@@ -75,6 +91,7 @@ async def get_dashboard_summary(
             "open_vulns": open_vulns,
             "mitigated_vulns": mitigated_vulns,
             "critical_high_count": crit_high_count,
+            "verified_dangerous_count": verified_dangerous_count,
             "scans_run_30d": scans_30d,
         },
     }
@@ -93,7 +110,6 @@ async def get_severity_distribution(
     result = await db.execute(counts_query)
     raw_dict = dict(result.all())
 
-    # Pre-defined colors and ordered categories
     palette = {
         VulnerabilitySeverity.critical: {"name": "Critical", "color": "#ef4444"},
         VulnerabilitySeverity.high: {"name": "High", "color": "#f97316"},
@@ -123,47 +139,40 @@ async def get_vulnerability_trend(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Dict[str, Any]:
-    """Retrieve vulnerability discovery velocity over the past 30 days."""
-    today = datetime.now(timezone.utc).date()
-    days_data: Dict[str, Dict[str, Any]] = {}
+    """Retrieve 30-day timeline trend showing newly discovered vulnerabilities per day."""
+    start_date = datetime.now(timezone.utc) - timedelta(days=29)
 
-    for i in range(29, -1, -1):
-        day = today - timedelta(days=i)
-        day_str = day.strftime("%Y-%m-%d")
-        display_label = day.strftime("%b %d")
-        days_data[day_str] = {
-            "date": display_label,
-            "full_date": day_str,
-            "discovered": 0,
-            "open": 0,
-            "mitigated": 0,
-        }
-
-    # Query discovery timeline
-    start_date = datetime.now(timezone.utc) - timedelta(days=30)
+    day_col = func.date_trunc(literal_column("'day'"), Vulnerability.first_seen_at).label("day")
     query = (
         select(
-            func.date(Vulnerability.first_seen_at).label("day"),
+            day_col,
             func.count(Vulnerability.id).label("count"),
-            func.sum(
-                case((Vulnerability.status == VulnerabilityStatus.mitigated, 1), else_=0)
-            ).label("mitigated_count"),
         )
         .where(Vulnerability.first_seen_at >= start_date)
-        .group_by(func.date(Vulnerability.first_seen_at))
+        .group_by(day_col)
+        .order_by(day_col)
     )
-
     records = (await db.execute(query)).all()
-    for row in records:
-        day_key = str(row.day)
-        if day_key in days_data:
-            days_data[day_key]["discovered"] = int(row.count)
-            days_data[day_key]["mitigated"] = int(row.mitigated_count or 0)
-            days_data[day_key]["open"] = int(row.count - (row.mitigated_count or 0))
+    counts_by_date = {
+        r.day.strftime("%Y-%m-%d") if hasattr(r.day, "strftime") else str(r.day)[:10]: r.count
+        for r in records
+    }
+
+    # Fill daily series for continuous area chart
+    trend_series = []
+    for i in range(30):
+        current_day = start_date + timedelta(days=i)
+        day_key = current_day.strftime("%Y-%m-%d")
+        display_label = current_day.strftime("%b %d")
+        trend_series.append({
+            "date": day_key,
+            "label": display_label,
+            "count": counts_by_date.get(day_key, 0),
+        })
 
     return {
         "status": "success",
-        "data": list(days_data.values()),
+        "data": trend_series,
     }
 
 
@@ -172,30 +181,58 @@ async def get_top_risky_assets(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Dict[str, Any]:
-    """Retrieve top 5 critical infrastructure nodes by open critical/high vulnerability volume."""
+    """Retrieve top 5 riskiest network assets ranked by number of open critical and high vulnerabilities."""
     query = (
         select(
             Asset.id,
             Asset.name,
             Asset.ip_address,
             Asset.criticality,
-            func.count(Vulnerability.id).label("total_vulns"),
-            func.sum(
-                case((Vulnerability.severity == VulnerabilitySeverity.critical, 1), else_=0)
+            func.count(
+                case(
+                    (
+                        (Vulnerability.severity == VulnerabilitySeverity.critical)
+                        & (Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress])),
+                        1,
+                    ),
+                    else_=None,
+                )
             ).label("critical_count"),
-            func.sum(
-                case((Vulnerability.severity == VulnerabilitySeverity.high, 1), else_=0)
+            func.count(
+                case(
+                    (
+                        (Vulnerability.severity == VulnerabilitySeverity.high)
+                        & (Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress])),
+                        1,
+                    ),
+                    else_=None,
+                )
             ).label("high_count"),
+            func.count(Vulnerability.id).label("total_vulns"),
         )
-        .join(Vulnerability, Vulnerability.asset_id == Asset.id)
-        .where(Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]))
+        .join(Vulnerability, Vulnerability.asset_id == Asset.id, isouter=True)
         .group_by(Asset.id, Asset.name, Asset.ip_address, Asset.criticality)
         .order_by(
-            func.sum(
-                case(
-                    (Vulnerability.severity == VulnerabilitySeverity.critical, 3),
-                    (Vulnerability.severity == VulnerabilitySeverity.high, 2),
-                    else_=1,
+            (
+                func.count(
+                    case(
+                        (
+                            (Vulnerability.severity == VulnerabilitySeverity.critical)
+                            & (Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress])),
+                            1,
+                        ),
+                        else_=None,
+                    )
+                ) * 2
+                + func.count(
+                    case(
+                        (
+                            (Vulnerability.severity == VulnerabilitySeverity.high)
+                            & (Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress])),
+                            1,
+                        ),
+                        else_=None,
+                    )
                 )
             ).desc()
         )
@@ -218,10 +255,51 @@ async def get_top_risky_assets(
             "total_vulns": int(r.total_vulns or 0),
         })
 
-    # If no assets with open vulns, return empty list cleanly
     return {
         "status": "success",
         "data": results,
+    }
+
+
+@router.get("/top-dangerous-vulns")
+async def get_top_dangerous_vulnerabilities(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Dict[str, Any]:
+    """Retrieve top 5 most dangerous active vulnerabilities ranked by danger_score."""
+    query = (
+        select(Vulnerability)
+        .options(selectinload(Vulnerability.asset))
+        .where(
+            Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
+            Vulnerability.danger_score.isnot(None),
+        )
+        .order_by(Vulnerability.danger_score.desc(), Vulnerability.id.desc())
+        .limit(5)
+    )
+    results = (await db.execute(query)).scalars().all()
+    items = [
+        {
+            "id": v.id,
+            "cve_id": v.cve_id,
+            "title": v.title,
+            "danger_score": v.danger_score,
+            "cvss_score": v.cvss_score,
+            "severity": v.severity.value,
+            "verification": v.verification.value,
+            "public_exploit": v.public_exploit,
+            "exploitability": v.exploitability,
+            "impact": v.impact,
+            "asset_name": v.asset.name if v.asset else f"Asset #{v.asset_id}",
+            "asset_ip": v.asset.ip_address if v.asset else None,
+            "service": v.service,
+            "port": v.port,
+        }
+        for v in results
+    ]
+    return {
+        "status": "success",
+        "data": items,
     }
 
 
@@ -247,6 +325,9 @@ async def get_recent_vulnerabilities(
             "severity": v.severity.value,
             "cvss_score": v.cvss_score,
             "risk_score": v.risk_score,
+            "danger_score": v.danger_score,
+            "verification": v.verification.value,
+            "public_exploit": v.public_exploit,
             "risk_tier": get_risk_tier(v.risk_score),
             "asset_name": v.asset.name if v.asset else f"Asset #{v.asset_id}",
             "asset_ip": v.asset.ip_address if v.asset else None,

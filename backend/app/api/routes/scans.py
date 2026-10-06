@@ -156,6 +156,21 @@ async def get_scan(
         none=raw_counts.get(VulnerabilitySeverity.none, 0),
     )
 
+    # Compute verification counts
+    from app.models.vulnerability import VerificationType
+    v_counts_query = (
+        select(Vulnerability.verification, func.count(Vulnerability.id))
+        .where(Vulnerability.scan_id == id)
+        .group_by(Vulnerability.verification)
+    )
+    v_counts_result = await db.execute(v_counts_query)
+    raw_v_counts = dict(v_counts_result.all())
+    verification_breakdown = {
+        "version_match": raw_v_counts.get(VerificationType.version_match, 0),
+        "nse_verified": raw_v_counts.get(VerificationType.nse_verified, 0),
+        "nuclei_verified": raw_v_counts.get(VerificationType.nuclei_verified, 0),
+    }
+
     return ScanDetailRead(
         id=scan.id,
         asset_id=scan.asset_id,
@@ -168,6 +183,7 @@ async def get_scan(
         total_vulns_found=scan.total_vulns_found,
         raw_output=scan.raw_output,
         vuln_counts=vuln_counts,
+        verification_breakdown=verification_breakdown,
     )
 
 
@@ -216,6 +232,12 @@ async def get_scan_vulnerabilities(
                 epss_score=v.epss_score,
                 status=v.status,
                 remediation=v.remediation,
+                verification=v.verification,
+                evidence=v.evidence,
+                danger_score=v.danger_score,
+                exploitability=v.exploitability,
+                impact=v.impact,
+                public_exploit=v.public_exploit,
                 first_seen_at=v.first_seen_at,
                 last_seen_at=v.last_seen_at,
             )

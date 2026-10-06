@@ -31,7 +31,12 @@ import {
   CartesianGrid 
 } from 'recharts';
 import api from '../api/client';
-import { SeverityBadge, RiskTierBadge } from '../components/Badge';
+import { 
+  SeverityBadge, 
+  RiskTierBadge,
+  VerificationBadge,
+  DangerScoreBadge 
+} from '../components/Badge';
 
 // Count-up animation helper
 function AnimatedNumber({ value, duration = 700 }) {
@@ -88,6 +93,7 @@ export default function Dashboard() {
   const [severityDist, setSeverityDist] = useState([]);
   const [trendData, setTrendData] = useState([]);
   const [topRiskyAssets, setTopRiskyAssets] = useState([]);
+  const [topDangerousVulns, setTopDangerousVulns] = useState([]);
   const [recentVulns, setRecentVulns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState(new Date());
@@ -95,12 +101,13 @@ export default function Dashboard() {
   const fetchDashboardData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     try {
-      const [sumRes, sevRes, trendRes, topRes, recRes] = await Promise.all([
+      const [sumRes, sevRes, trendRes, topRes, recRes, dangerRes] = await Promise.all([
         api.get('/api/dashboard/summary'),
         api.get('/api/dashboard/severity-distribution'),
         api.get('/api/dashboard/trend'),
         api.get('/api/dashboard/top-risky-assets'),
         api.get('/api/dashboard/recent-vulns'),
+        api.get('/api/dashboard/top-dangerous-vulns'),
       ]);
 
       setSummary(sumRes.data.data || {});
@@ -108,6 +115,7 @@ export default function Dashboard() {
       setTrendData(trendRes.data.data || []);
       setTopRiskyAssets(topRes.data.data || []);
       setRecentVulns(recRes.data.data || []);
+      setTopDangerousVulns(dangerRes.data.data || []);
       setLastRefreshed(new Date());
     } catch (err) {
       console.error('Failed to load dashboard telemetry:', err);
@@ -175,7 +183,7 @@ export default function Dashboard() {
       </div>
 
       {/* Row 1: KPI Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Card 1: Total Vulnerabilities */}
         <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md relative overflow-hidden group hover:border-slate-700 transition-colors">
           <div className="flex items-center justify-between">
@@ -229,7 +237,36 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Card 3: Assets Monitored */}
+        {/* Card 3: Verified Dangerous Vulns */}
+        <div className={`p-5 rounded-xl border backdrop-blur-md relative overflow-hidden group transition-all ${
+          (summary?.verified_dangerous_count || 0) > 0
+            ? 'border-amber-500/40 bg-gradient-to-b from-amber-950/20 to-slate-950/70 shadow-[0_0_25px_rgba(245,158,11,0.12)]'
+            : 'border-slate-800 bg-slate-950/70'
+        }`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono uppercase tracking-wider text-amber-400 font-semibold flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 fill-amber-400/30" />
+              <span>Verified Dangerous</span>
+            </span>
+            <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <ShieldAlert className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="text-2xl font-bold font-mono text-amber-400 tracking-tight">
+              {loading ? (
+                <div className="h-8 w-16 bg-slate-800 animate-pulse rounded" />
+              ) : (
+                <AnimatedNumber value={summary?.verified_dangerous_count || 0} />
+              )}
+            </div>
+            <p className="text-[11px] text-amber-400/80 mt-1 font-mono">
+              Danger &gt; 6.0 (Active Proof)
+            </p>
+          </div>
+        </div>
+
+        {/* Card 4: Assets Monitored */}
         <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md relative overflow-hidden group hover:border-slate-700 transition-colors">
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono uppercase tracking-wider text-slate-400">Assets Monitored</span>
@@ -251,10 +288,10 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Card 4: Scans Run (30d) */}
+        {/* Card 5: Scans Run (30d) */}
         <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md relative overflow-hidden group hover:border-slate-700 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase tracking-wider text-slate-400">Scans Executed (30d)</span>
+            <span className="text-xs font-mono uppercase tracking-wider text-slate-400">Scans Run (30d)</span>
             <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
               <Activity className="w-4 h-4" />
             </div>
@@ -268,7 +305,7 @@ export default function Dashboard() {
               )}
             </div>
             <p className="text-[11px] text-slate-500 mt-1 font-mono flex items-center gap-1">
-              <span>Automated Nmap audits</span>
+              <span>Automated audit pipelines</span>
             </p>
           </div>
         </div>
@@ -450,7 +487,114 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Row 4: Recent Discoveries Table */}
+      {/* Row 4: Top Dangerous Vulnerabilities (Active Verification Engine) */}
+      <div className="rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md overflow-hidden">
+        <div className="p-4 border-b border-slate-800/80 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Flame className="w-4 h-4 text-rose-400 fill-rose-500/30" />
+            <h2 className="text-sm font-semibold text-white font-mono uppercase tracking-wider">
+              Top Dangerous Active Vulnerabilities
+            </h2>
+            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-rose-500/10 text-rose-400 border border-rose-500/30">
+              Composite Danger Engine
+            </span>
+          </div>
+          <button
+            onClick={() => navigate('/vulns?sort_by=danger_score&order=desc')}
+            className="text-xs text-cyan-400 hover:text-cyan-300 font-mono inline-flex items-center gap-1 cursor-pointer"
+          >
+            <span>View All Ranked</span>
+            <ExternalLink className="w-3 h-3" />
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs font-sans">
+            <thead>
+              <tr className="border-b border-slate-800/80 bg-slate-950 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
+                <th className="py-3 px-4">CVE Identifier</th>
+                <th className="py-3 px-4">Danger Score</th>
+                <th className="py-3 px-4">Verification</th>
+                <th className="py-3 px-4">CVSS</th>
+                <th className="py-3 px-4">Severity</th>
+                <th className="py-3 px-4">Affected Asset</th>
+                <th className="py-3 px-4">Service</th>
+                <th className="py-3 px-4 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {loading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    <td className="py-3.5 px-4"><div className="h-4 w-28 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-16 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-12 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-16 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-32 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-20 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4 text-right"><div className="h-4 w-16 bg-slate-800 rounded ml-auto" /></td>
+                  </tr>
+                ))
+              ) : topDangerousVulns.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-500 font-mono text-xs">
+                    No active high-danger vulnerabilities detected. Run a Deep Scan to actively audit targets.
+                  </td>
+                </tr>
+              ) : (
+                topDangerousVulns.map((v) => (
+                  <tr
+                    key={v.id}
+                    onClick={() => navigate('/vulns')}
+                    className="hover:bg-slate-900/40 transition-colors cursor-pointer group"
+                  >
+                    <td className="py-3.5 px-4 font-mono font-bold text-cyan-400 group-hover:text-cyan-300">
+                      <div className="flex items-center gap-1.5">
+                        <span>{v.cve_id}</span>
+                        {v.public_exploit && (
+                          <span title="Public exploit code weaponized" className="text-sm">🔥</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <DangerScoreBadge score={v.danger_score} />
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <VerificationBadge verification={v.verification} />
+                    </td>
+                    <td className="py-3.5 px-4 font-mono font-bold text-white">
+                      {Number(v.cvss_score || 0).toFixed(1)}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <SeverityBadge severity={v.severity} />
+                    </td>
+                    <td className="py-3.5 px-4 font-mono text-slate-300">
+                      {v.asset_name}
+                    </td>
+                    <td className="py-3.5 px-4 font-mono text-slate-400">
+                      {v.service || 'Service'}{v.port ? `:${v.port}` : ''}
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate('/vulns');
+                        }}
+                        className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 text-xs font-mono transition-colors"
+                      >
+                        Inspect
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Row 5: Recent Discoveries Table */}
       <div className="rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md overflow-hidden">
         <div className="p-4 border-b border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-2">
