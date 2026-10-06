@@ -17,6 +17,24 @@ class ScanCreate(ScanBase):
     pass
 
 
+class DirectScanCreate(BaseModel):
+    target: str = Field(..., min_length=1, description="Target IP address, domain name, or URL")
+    scan_type: ScanType = ScanType.quick
+
+
+class DirectScanResponse(BaseModel):
+    scan_id: int
+    asset_id: int
+    asset_name: str
+    target: str
+    target_type: str
+    resolved_ip: Optional[str] = None
+    scan_type: ScanType
+    status: ScanStatus = ScanStatus.running
+    auto_created: bool = False
+    message: Optional[str] = None
+
+
 class ScanRead(BaseModel):
     id: int
     asset_id: int

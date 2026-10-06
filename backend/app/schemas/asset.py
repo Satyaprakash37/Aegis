@@ -26,6 +26,8 @@ class AssetBase(BaseModel):
     description: Optional[str] = None
     target_type: Optional[TargetType] = TargetType.ip
     resolved_ip: Optional[str] = None
+    auto_created: bool = False
+    is_seed: bool = False
 
 
 class AssetCreate(AssetBase):
@@ -43,12 +45,16 @@ class AssetUpdate(BaseModel):
     description: Optional[str] = None
     target_type: Optional[TargetType] = None
     resolved_ip: Optional[str] = None
+    auto_created: Optional[bool] = None
+    is_seed: Optional[bool] = None
 
 
 class AssetRead(AssetBase):
     id: int
     target_type: TargetType
     resolved_ip: Optional[str] = None
+    auto_created: bool = False
+    is_seed: bool = False
     created_at: datetime
     updated_at: datetime
 

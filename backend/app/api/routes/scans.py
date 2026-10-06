@@ -4,24 +4,122 @@ from datetime import datetime, timezone
 import logging
 from typing import Annotated, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, require_analyst_or_admin
 from app.db.session import get_db
-from app.models.asset import Asset
+from app.models.asset import Asset, AssetEnvironment, AssetType, TargetType
 from app.models.scan import Scan, ScanStatus, ScanType
 from app.models.user import User
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity
 from app.schemas.asset import VulnSeverityCounts
-from app.schemas.scan import ScanCreate, ScanDetailRead, ScanListResponse, ScanRead
+from app.schemas.scan import (
+    DirectScanCreate,
+    DirectScanResponse,
+    ScanCreate,
+    ScanDetailRead,
+    ScanListResponse,
+    ScanRead,
+)
 from app.schemas.vulnerability import VulnerabilityRead
 from app.services.scanner.pipeline import execute_scan_pipeline
+from app.services.scanner.target_resolver import resolve_target
 
 logger = logging.getLogger("aegis.scans")
 
 router = APIRouter(prefix="/scans", tags=["Scans"])
+
+
+@router.post("/direct", response_model=DirectScanResponse, status_code=status.HTTP_201_CREATED)
+async def create_direct_scan(
+    scan_in: DirectScanCreate,
+    background_tasks: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_analyst_or_admin)],
+) -> DirectScanResponse:
+    """Directly scan any IP address, domain name, or URL without pre-registering an asset."""
+    # 1. Run resolve_target on input
+    resolution = resolve_target(scan_in.target)
+    if resolution["type"] == "invalid":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=resolution["error"],
+        )
+
+    cleaned_target = resolution["target"]
+    resolved_ip = resolution["ip"] if resolution["type"] == "domain" else None
+    effective_ip = resolution["ip"]
+    target_type = TargetType.domain if resolution["type"] == "domain" else TargetType.ip
+    hostname = resolution.get("hostname")
+
+    # 2. Search existing assets (match ip_address OR resolved_ip)
+    search_conditions = [
+        Asset.ip_address == cleaned_target,
+        Asset.resolved_ip == cleaned_target,
+    ]
+    if resolved_ip:
+        search_conditions.extend([
+            Asset.ip_address == resolved_ip,
+            Asset.resolved_ip == resolved_ip,
+        ])
+    elif effective_ip:
+        search_conditions.append(Asset.resolved_ip == effective_ip)
+
+    existing_query = await db.execute(select(Asset).where(or_(*search_conditions)))
+    asset = existing_query.scalar_one_or_none()
+
+    auto_created = False
+    if not asset:
+        # 3. No match found -> auto-create asset silently
+        asset = Asset(
+            name=cleaned_target,
+            ip_address=cleaned_target,
+            target_type=target_type,
+            resolved_ip=resolved_ip,
+            hostname=hostname,
+            asset_type=AssetType.server,
+            environment=AssetEnvironment.production,
+            criticality=3,
+            owner="Auto-Discovered",
+            description=f"Auto-registered target created via direct scan on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}.",
+            auto_created=True,
+            is_seed=False,
+        )
+        db.add(asset)
+        await db.commit()
+        await db.refresh(asset)
+        auto_created = True
+
+    # 4. Initialize scan
+    new_scan = Scan(
+        asset_id=asset.id,
+        scan_type=scan_in.scan_type,
+        status=ScanStatus.pending,
+        started_at=datetime.now(timezone.utc),
+        total_vulns_found=0,
+        raw_output=None,
+    )
+    db.add(new_scan)
+    await db.commit()
+    await db.refresh(new_scan)
+
+    # 5. Launch scan pipeline in background
+    background_tasks.add_task(execute_scan_pipeline, new_scan.id)
+
+    return DirectScanResponse(
+        scan_id=new_scan.id,
+        asset_id=asset.id,
+        asset_name=asset.name,
+        target=asset.ip_address,
+        target_type=asset.target_type.value if hasattr(asset.target_type, "value") else str(asset.target_type),
+        resolved_ip=asset.resolved_ip,
+        scan_type=new_scan.scan_type,
+        status=ScanStatus.running,
+        auto_created=auto_created,
+        message=f"Direct scan #{new_scan.id} initiated on '{cleaned_target}'.",
+    )
 
 
 @router.post("", response_model=ScanRead, status_code=status.HTTP_201_CREATED)

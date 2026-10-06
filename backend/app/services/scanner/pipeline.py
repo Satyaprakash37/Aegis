@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.db.session import AsyncSessionLocal
-from app.models.asset import Asset, TargetType
+from app.models.asset import Asset, AssetType, TargetType
 from app.models.scan import Scan, ScanStatus, ScanType
 from app.models.vulnerability import (
     Vulnerability,
@@ -277,6 +277,36 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                         await db.commit()
                         total_vulns += 1
                         verification_counts["version_match"] += 1
+
+            # 3. Smart Asset Type Detection for auto_created assets
+            if getattr(asset, "auto_created", False):
+                discovered_port_numbers = {p.get("port") for p in ports if p.get("port")}
+                for vf in active_verified_findings:
+                    if vf.get("port"):
+                        discovered_port_numbers.add(vf.get("port"))
+
+                discovered_services = {
+                    (p.get("service") or "").lower() for p in ports if p.get("service")
+                }
+
+                WEB_PORTS = {80, 443, 8080, 8443, 3000, 3001, 8000, 8081, 5000, 9000}
+                DB_PORTS = {5432, 3306, 1433, 1521, 27017, 6379, 5433, 33060}
+
+                is_web = any(p in WEB_PORTS for p in discovered_port_numbers) or any(
+                    s in ("http", "https", "http-proxy", "web", "apache", "nginx", "node")
+                    for s in discovered_services
+                )
+                is_db = any(p in DB_PORTS for p in discovered_port_numbers) or any(
+                    s in ("postgresql", "postgres", "mysql", "mssql", "oracle", "mongodb", "redis")
+                    for s in discovered_services
+                )
+
+                if is_web:
+                    asset.asset_type = AssetType.web
+                    logger.info(f"Smart Detection: Auto-created asset #{asset.id} ('{asset.name}') updated to type 'web'")
+                elif is_db:
+                    asset.asset_type = AssetType.db
+                    logger.info(f"Smart Detection: Auto-created asset #{asset.id} ('{asset.name}') updated to type 'db'")
 
             # Update final scan record with breakdown
             raw_out = scan.raw_output or {}

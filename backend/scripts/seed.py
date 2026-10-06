@@ -165,7 +165,7 @@ async def seed_database():
             if existing_ip:
                 created_assets[a_spec["name"]] = existing_ip
             else:
-                asset = Asset(**a_spec)
+                asset = Asset(**a_spec, is_seed=True)
                 session.add(asset)
                 await session.flush()
                 created_assets[a_spec["name"]] = asset

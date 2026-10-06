@@ -13,7 +13,11 @@ import {
   Search,
   ExternalLink,
   Terminal,
-  AlertCircle
+  AlertCircle,
+  Check,
+  ChevronDown,
+  Crosshair,
+  Globe
 } from 'lucide-react';
 import api from '../api/client';
 import { ScanStatusBadge } from '../components/Badge';
@@ -29,7 +33,9 @@ export default function Scans() {
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // New Scan Form State
+  // New Scan Form State (Direct target input is primary)
+  const [targetInput, setTargetInput] = useState('');
+  const [isSavedAssetsOpen, setIsSavedAssetsOpen] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState('');
   const [scanType, setScanType] = useState('quick');
 
@@ -45,6 +51,32 @@ export default function Scans() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Helper to normalize and match inputs
+  const cleanInput = (raw) => {
+    if (!raw) return '';
+    let str = raw.trim().toLowerCase();
+    str = str.replace(/^[a-zA-Z]+:\/\//, '');
+    str = str.split(/[/?#]/)[0];
+    if (str.includes(':')) {
+      const parts = str.split(':');
+      if (parts.length === 2 && !isNaN(parts[1])) str = parts[0];
+    }
+    return str.trim();
+  };
+
+  const cleanedTarget = cleanInput(targetInput);
+  const isIpv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(cleanedTarget);
+  const isDomain = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(cleanedTarget);
+  const isValidFormat = isIpv4 || isDomain;
+
+  const matchedAsset = assets.find((a) => {
+    if (!cleanedTarget) return false;
+    const aClean = cleanInput(a.ip_address);
+    const aRes = a.resolved_ip ? cleanInput(a.resolved_ip) : null;
+    const aName = a.name ? a.name.toLowerCase() : null;
+    return aClean === cleanedTarget || aRes === cleanedTarget || aName === cleanedTarget;
+  });
 
   // Fetch registered assets for the dropdown
   const fetchAssets = async () => {
@@ -114,24 +146,35 @@ export default function Scans() {
     };
   }, [scans, fetchScans]);
 
-  // Handle Scan Initiation
+  // Handle Scan Initiation (Direct scan or saved asset scan)
   const handleStartScan = async (e) => {
     e.preventDefault();
-    if (!selectedAssetId) {
-      showToast('Please select a target asset first', 'error');
+    const trimmedTarget = targetInput.trim();
+    if (!trimmedTarget && !selectedAssetId) {
+      showToast('Please enter a target IP, domain or select a saved asset', 'error');
       return;
     }
 
     setSubmitting(true);
     try {
-      const payload = {
-        asset_id: parseInt(selectedAssetId, 10),
-        scan_type: scanType,
-      };
-
-      const res = await api.post('/api/scans', payload);
-      showToast(`Scan initiated on ${res.data.asset_name || 'asset'}. Pipeline executing in background.`);
+      if (trimmedTarget) {
+        // Direct scan endpoint: auto-discovers/reuses asset seamlessly
+        const res = await api.post('/api/scans/direct', {
+          target: trimmedTarget,
+          scan_type: scanType,
+        });
+        const targetLabel = res.data.target || res.data.asset_name || trimmedTarget;
+        showToast(`Scan launched on ${targetLabel}`);
+      } else {
+        const payload = {
+          asset_id: parseInt(selectedAssetId, 10),
+          scan_type: scanType,
+        };
+        const res = await api.post('/api/scans', payload);
+        showToast(`Scan initiated on ${res.data.asset_name || 'asset'}`);
+      }
       fetchScans();
+      fetchAssets();
     } catch (err) {
       showToast(err.response?.data?.detail || 'Failed to launch scan pipeline', 'error');
     } finally {
@@ -199,28 +242,95 @@ export default function Scans() {
         </div>
 
         <form onSubmit={handleStartScan} className="space-y-4">
-          {/* Target Asset Dropdown */}
-          <div className="max-w-xl">
-            <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-              Target Infrastructure Asset *
-            </label>
+          {/* PRIMARY INPUT: Direct Scan Target */}
+          <div className="max-w-2xl space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-mono text-slate-300 uppercase tracking-wider font-semibold">
+                Scan Target *
+              </label>
+              {targetInput.trim() && (
+                <div className="flex items-center gap-1.5">
+                  {isValidFormat ? (
+                    <span className="flex items-center gap-1 text-[11px] font-mono font-medium text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 px-2 py-0.5 rounded">
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span>{isIpv4 ? 'Valid IPv4 Host' : 'Valid Domain / URL'}</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-[11px] font-mono text-amber-400/90 bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 rounded">
+                      <span>Analyzing target format...</span>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="relative">
-              <select
-                value={selectedAssetId}
-                onChange={(e) => setSelectedAssetId(e.target.value)}
-                disabled={submitting || assets.length === 0}
-                className="w-full px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500 transition-colors font-mono disabled:opacity-50"
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <Crosshair className="w-4 h-4 text-cyan-400" />
+              </div>
+              <input
+                type="text"
+                value={targetInput}
+                onChange={(e) => {
+                  setTargetInput(e.target.value);
+                  if (selectedAssetId) setSelectedAssetId('');
+                }}
+                placeholder="Enter IP, domain or URL (e.g. 192.168.1.1, example.com, https://site.com)"
+                className="w-full pl-10 pr-4 py-3 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 font-mono focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition-all shadow-inner"
+              />
+            </div>
+
+            {/* Hint below input: matched existing asset or format help */}
+            {matchedAsset ? (
+              <div className="text-xs font-mono text-cyan-400 bg-cyan-950/30 border border-cyan-800/30 px-3 py-1.5 rounded-lg flex items-center gap-2 animate-in fade-in duration-150">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                <span>Existing asset found:</span>
+                <strong className="text-white font-semibold">{matchedAsset.name}</strong>
+                <span className="text-slate-400">({matchedAsset.ip_address}{matchedAsset.resolved_ip ? ` ↳ ${matchedAsset.resolved_ip}` : ''})</span>
+              </div>
+            ) : targetInput.trim() && !isValidFormat ? (
+              <p className="text-[11px] font-mono text-slate-500 pl-1">
+                Enter an IPv4 address (e.g. 192.168.1.1), domain name (e.g. google.com), or URL (https://site.com).
+              </p>
+            ) : null}
+
+            {/* Collapsible Secondary: Saved Assets Selection */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setIsSavedAssetsOpen(!isSavedAssetsOpen)}
+                className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer select-none"
               >
-                {assets.length === 0 ? (
-                  <option value="">No assets registered. Add assets first.</option>
-                ) : (
-                  assets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} — {a.target_type === 'domain' ? `🌐 ${a.ip_address} (IP: ${a.resolved_ip || 'resolved'})` : `🖥️ ${a.ip_address}`} ({a.asset_type})
-                    </option>
-                  ))
-                )}
-              </select>
+                <ChevronDown className={`w-3.5 h-3.5 transform transition-transform duration-150 ${isSavedAssetsOpen ? 'rotate-180' : ''}`} />
+                <span>Or select from saved assets ({assets.length})</span>
+              </button>
+
+              {isSavedAssetsOpen && (
+                <div className="mt-2 p-3 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-2 animate-in fade-in duration-150">
+                  <label className="block text-[11px] font-mono text-slate-400 uppercase tracking-wider">
+                    Select registered inventory asset
+                  </label>
+                  <select
+                    value={selectedAssetId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedAssetId(id);
+                      const found = assets.find(a => a.id.toString() === id);
+                      if (found) {
+                        setTargetInput(found.ip_address);
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500 transition-colors font-mono"
+                  >
+                    <option value="">-- Choose a saved asset --</option>
+                    {assets.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} — {a.target_type === 'domain' ? `🌐 ${a.ip_address} (IP: ${a.resolved_ip || 'resolving'})` : `🖥️ ${a.ip_address}`} ({a.asset_type})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -328,7 +438,7 @@ export default function Scans() {
 
             <button
               type="submit"
-              disabled={submitting || assets.length === 0}
+              disabled={submitting || (!targetInput.trim() && !selectedAssetId)}
               className={`w-full sm:w-auto py-2.5 px-6 rounded-lg font-semibold text-xs font-mono transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
                 scanType === 'deep'
                   ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.3)]'

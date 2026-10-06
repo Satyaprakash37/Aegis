@@ -2,7 +2,7 @@
 
 import enum
 from typing import TYPE_CHECKING, List, Optional
-from sqlalchemy import Enum, Integer, String, Text
+from sqlalchemy import Boolean, Enum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -60,6 +60,8 @@ class Asset(Base, TimestampMixin):
     criticality: Mapped[int] = mapped_column(Integer, nullable=False)  # Scale 1-5
     owner: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    auto_created: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    is_seed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
     # Relationships
     scans: Mapped[List["Scan"]] = relationship(

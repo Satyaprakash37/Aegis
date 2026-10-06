@@ -188,6 +188,8 @@ async def get_asset(
         criticality=asset.criticality,
         owner=asset.owner,
         description=asset.description,
+        auto_created=asset.auto_created,
+        is_seed=asset.is_seed,
         created_at=asset.created_at,
         updated_at=asset.updated_at,
         vuln_counts=counts,
@@ -275,6 +277,28 @@ async def update_asset(
     await db.commit()
     await db.refresh(asset)
     return asset
+
+
+@router.delete("/seed", status_code=status.HTTP_200_OK)
+async def clear_demo_data(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
+) -> dict:
+    """Clear all seeded demo infrastructure assets and cascading findings. Admin only."""
+    query = await db.execute(select(Asset).where(Asset.is_seed == True))
+    seed_assets = query.scalars().all()
+
+    count = len(seed_assets)
+    for a in seed_assets:
+        await db.delete(a)
+
+    await db.commit()
+
+    return {
+        "data": {"deleted_count": count},
+        "message": f"Successfully cleared {count} demo seed assets and associated findings.",
+        "status": "success",
+    }
 
 
 @router.delete("/{id}")

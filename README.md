@@ -75,6 +75,12 @@ Dark SOC theme with JWT role-based access control, account lockout protection, a
   - Evaluates ease of exploitation (weaponized public exploit, Metasploit integration, remote vs local).
   - Assesses blast radius and threat impact (Remote Code Execution, Privilege Escalation, SQLi, Authentication Bypass, Information Disclosure).
   - Flags weaponized exploits with 🔥 in tables and SOC dashboards.
+- **Direct Target Scanning & Auto-Discovery (Phase 8.2):**
+  - **Zero Pre-Registration Scanning:** Scan any IP address, domain, or URL directly from the Scans page without pre-registering an asset in inventory.
+  - **Intelligent Target Deduplication:** Automatically checks existing inventory for matching IP addresses or resolved DNS records, re-using existing assets without duplication.
+  - **Silent Asset Creation & AUTO Badging:** Automatically provisions new inventory entities with `AUTO` badge indicators, baseline criticality, and `Auto-Discovered` ownership.
+  - **Smart Post-Scan Asset Classification:** Infers asset type from discovered open ports (e.g., ports 80, 443, 3000 -> `Web`; ports 5432, 3306 -> `Db`; otherwise `Server`).
+  - **Demo Data Lifecycle Management:** Admin utility and UI button ("Clear Demo Data") to cleanly wipe seeded demonstration fixtures while preserving operator-scanned targets.
 - **Domain & URL Target Support with Auto DNS Resolution (Phase 8.1):**
   - **Flexible Ingestion:** Accepts IPv4 addresses, domain hostnames (`example.com`), and complete URLs (`https://example.com:8080/api`).
   - **URL Normalization:** Automatically strips protocols, userinfo, paths, queries, and port suffixes.
@@ -184,8 +190,10 @@ All protected endpoints require a valid Bearer JWT token in the `Authorization` 
 | `POST` | `/api/assets` | Admin, Analyst | Register new infrastructure asset |
 | `GET` | `/api/assets/{id}` | Authenticated | Get asset details with severity breakdown |
 | `PUT` | `/api/assets/{id}` | Admin, Analyst | Update asset parameters and criticality |
+| `DELETE`| `/api/assets/seed` | Admin | Cleanly delete seeded demo assets and cascading findings |
 | `DELETE`| `/api/assets/{id}` | Admin | Delete asset and cascade associated vulnerabilities |
-| `POST` | `/api/scans` | Admin, Analyst | Launch quick, full, or deep active scan job |
+| `POST` | `/api/scans/direct` | Admin, Analyst | Direct scan on arbitrary target (auto-creates or reuses asset) |
+| `POST` | `/api/scans` | Admin, Analyst | Launch quick, full, or deep active scan job on registered asset |
 | `GET` | `/api/scans` | Authenticated | List historical scans with status and findings |
 | `GET` | `/api/scans/{id}` | Authenticated | Get scan run status and raw port execution telemetry |
 | `GET` | `/api/vulns` | Authenticated | Paginated vulnerabilities with `?verification=` and `?min_danger=` filters |

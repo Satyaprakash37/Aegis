@@ -132,6 +132,17 @@ Normalizes, validates, and automatically resolves diverse network target specifi
 - **Cross-Target Conflict Detection:** Detects duplicates bidirectionally across `ip_address` and `resolved_ip` (prevents registering domain targets whose resolved IP is already monitored, and vice versa).
 - **Scanner Execution Target:** Scanner engine directs Nmap and Nuclei probes to the resolved IP while attributing findings to the parent domain identity.
 
+### E. Direct Target Scanning & Auto-Discovery (Phase 8.2)
+Streamlines operator workflow by removing asset registration preconditions:
+- **Instant Target Scanning (`POST /api/scans/direct`):** Operator provides arbitrary IPv4 address, domain name, or URL. Input undergoes real-time DNS resolution and validation.
+- **Deduplication & Asset Reuse:** System inspects existing inventory across `ip_address` and `resolved_ip`. If target already exists, the scan attaches immediately to the existing asset record without duplicating entries.
+- **Silent Asset Auto-Creation:** Unregistered targets automatically instantiate a monitored asset record flagged with `auto_created = True`, baseline `criticality = 3`, and owner `"Auto-Discovered"`.
+- **Smart Asset Type Inference:** Post-scan inspection dynamically infers asset classification:
+  - If open ports/services include web infrastructure (`80`, `443`, `3000`, `8080`, `8443`, etc.), `asset_type` updates to `web`.
+  - If open ports/services include database engines (`5432`, `3306`, `27017`, `6379`, etc.), `asset_type` updates to `db`.
+  - Default falls back to `server`.
+- **Demo Data Lifecycle Management:** Distinguishes demonstration seeds (`is_seed = True`) from operator-scanned targets. Endpoint `DELETE /api/assets/seed` cleanly removes demo fixtures and cascading findings while preserving all operator-scanned targets.
+
 ---
 
 ## 5. Deep Active Verification Architecture (Phase 8)
@@ -175,11 +186,13 @@ Deep scanning moves beyond probabilistic banner matching to active, evidence-bac
 - `/api/assets`
   - `GET /`: List assets (pagination, search, filter by criticality/environment)
   - `POST /`: Create asset
+  - `DELETE /seed`: Delete all seed demo assets and cascading findings (admin only)
   - `GET /{id}`: Asset details
   - `PUT /{id}`: Update asset
   - `DELETE /{id}`: Delete asset
 - `/api/scans`
-  - `POST /`: Trigger scan (quick/full)
+  - `POST /direct`: Trigger direct scan on any IP, domain, or URL (auto-creates or reuses asset)
+  - `POST /`: Trigger scan on existing registered asset (quick/full/deep)
   - `GET /`: List scan history
   - `GET /{id}`: Scan execution status and raw output
 - `/api/vulns`
@@ -237,6 +250,7 @@ Deep scanning moves beyond probabilistic banner matching to active, evidence-bac
 - **Phase 7:** Platform polish, database seeding script, comprehensive documentation & testing.
 - **Phase 8:** Deep Active Vulnerability Scanning + Active Verification Engine (Nmap NSE + Nuclei v3) + Threat Danger Assessment Engine.
 - **Phase 8.1:** Domain & URL Target Support with Automatic DNS Resolution, Bidirectional Conflict Detection, and Visual 🌐/🖥️ Indicators.
+- **Phase 8.2:** Direct Target Scanning (No Asset Pre-Registration Required), Automatic Asset Deduplication & Reuse, Smart Asset Type Detection, and Demo Data Lifecycle Teardown.
 
 ---
 
