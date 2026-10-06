@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health
+from app.api.routes import auth, health
 from app.core.config import settings
 
 # Configure logging
@@ -42,7 +42,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     """Handle standard HTTP exceptions with structured response format."""
     return JSONResponse(
         status_code=exc.status_code,
+        headers=exc.headers,
         content={
+            "detail": exc.detail,
             "data": None,
             "message": exc.detail,
             "status": "error",
@@ -57,6 +59,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     return JSONResponse(
         status_code=500,
         content={
+            "detail": "Internal server error occurred.",
             "data": None,
             "message": "Internal server error occurred.",
             "status": "error",
@@ -66,3 +69,4 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 # Include Routers
 app.include_router(health.router)
+app.include_router(auth.router, prefix="/api")

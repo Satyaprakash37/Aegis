@@ -3,7 +3,7 @@
 Exports Pydantic validation schemas for data transfer and serialization.
 """
 
-from app.schemas.user import UserBase, UserCreate, UserRead
+from app.schemas.user import UserBase, UserCreate, UserRead, Token, TokenPayload
 from app.schemas.asset import AssetBase, AssetCreate, AssetRead
 from app.schemas.scan import ScanBase, ScanCreate, ScanRead
 from app.schemas.vulnerability import (
@@ -17,6 +17,8 @@ __all__ = [
     "UserBase",
     "UserCreate",
     "UserRead",
+    "Token",
+    "TokenPayload",
     "AssetBase",
     "AssetCreate",
     "AssetRead",
