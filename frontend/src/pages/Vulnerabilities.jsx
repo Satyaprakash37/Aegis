@@ -11,10 +11,17 @@ import {
   Calendar, 
   ShieldCheck, 
   FileCode,
-  Tag
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  RefreshCw,
+  Cpu,
+  Layers,
+  CheckCircle2
 } from 'lucide-react';
 import api from '../api/client';
-import { SeverityBadge, VulnStatusBadge } from '../components/Badge';
+import { SeverityBadge, VulnStatusBadge, RiskTierBadge } from '../components/Badge';
+import Toast from '../components/Toast';
 
 export default function Vulnerabilities() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -23,17 +30,26 @@ export default function Vulnerabilities() {
   // State
   const [vulns, setVulns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [recalculating, setRecalculating] = useState(false);
   const [selectedVuln, setSelectedVuln] = useState(null);
+  const [toast, setToast] = useState(null);
 
-  // Filters
+  // Filters & Sorting
   const [search, setSearch] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [sortBy, setSortBy] = useState('risk_score');
+  const [order, setOrder] = useState('desc');
 
   // Pagination
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const pageSize = 15;
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const fetchVulns = useCallback(async () => {
     setLoading(true);
@@ -41,6 +57,8 @@ export default function Vulnerabilities() {
       const params = {
         page,
         page_size: pageSize,
+        sort_by: sortBy,
+        order,
       };
       if (search) params.search = search;
       if (severityFilter) params.severity = severityFilter;
@@ -55,11 +73,53 @@ export default function Vulnerabilities() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, severityFilter, statusFilter, scanIdParam]);
+  }, [page, pageSize, search, severityFilter, statusFilter, scanIdParam, sortBy, order]);
 
   useEffect(() => {
     fetchVulns();
   }, [fetchVulns]);
+
+  // Handle Sort Toggle
+  const handleSort = (field) => {
+    if (sortBy === field) {
+      setOrder(order === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortBy(field);
+      setOrder('desc');
+    }
+    setPage(1);
+  };
+
+  // Inline Status Change Handler
+  const handleStatusChange = async (vulnId, newStatus, e) => {
+    e.stopPropagation();
+    try {
+      const res = await api.patch(`/api/vulns/${vulnId}/status`, { status: newStatus });
+      setVulns((prev) =>
+        prev.map((v) => (v.id === vulnId ? { ...v, status: res.data.status } : v))
+      );
+      if (selectedVuln && selectedVuln.id === vulnId) {
+        setSelectedVuln((prev) => ({ ...prev, status: res.data.status }));
+      }
+      showToast(`Vulnerability status updated to ${newStatus}`);
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to update vulnerability status', 'error');
+    }
+  };
+
+  // Recalculate Risk Scores (Admin)
+  const handleRecalculateRisk = async () => {
+    setRecalculating(true);
+    try {
+      const res = await api.post('/api/vulns/recalculate-risk');
+      showToast(res.data.message || 'Risk scores recalculated successfully');
+      fetchVulns();
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to recalculate risk scores', 'error');
+    } finally {
+      setRecalculating(false);
+    }
+  };
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '—';
@@ -75,8 +135,21 @@ export default function Vulnerabilities() {
     }
   };
 
+  const renderSortIcon = (field) => {
+    if (sortBy !== field) {
+      return <ArrowUpDown className="w-3 h-3 text-slate-500 opacity-60" />;
+    }
+    return order === 'desc' ? (
+      <ArrowDown className="w-3 h-3 text-cyan-400" />
+    ) : (
+      <ArrowUp className="w-3 h-3 text-cyan-400" />
+    );
+  };
+
   return (
     <div className="space-y-6">
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -89,24 +162,36 @@ export default function Vulnerabilities() {
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1 font-sans">
-            Enriched CVE findings from NVD database cross-referenced against active network assets
+            Prioritized by Contextual Risk Engine (CVSS 60% + Asset Criticality 40%)
           </p>
         </div>
 
-        {scanIdParam && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-xs font-mono text-cyan-300">
-            <span>Filtering by Scan #{scanIdParam}</span>
-            <button
-              onClick={() => {
-                searchParams.delete('scan_id');
-                setSearchParams(searchParams);
-              }}
-              className="text-cyan-400 hover:text-white"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {scanIdParam && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-xs font-mono text-cyan-300">
+              <span>Filter: Scan #{scanIdParam}</span>
+              <button
+                onClick={() => {
+                  searchParams.delete('scan_id');
+                  setSearchParams(searchParams);
+                }}
+                className="text-cyan-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={handleRecalculateRisk}
+            disabled={recalculating}
+            title="Recalculate contextual risk scores for all vulnerabilities"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 font-mono transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${recalculating ? 'animate-spin' : ''}`} />
+            <span>Recalculate Risk</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters and Search */}
@@ -172,14 +257,39 @@ export default function Vulnerabilities() {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs font-sans">
             <thead>
-              <tr className="border-b border-slate-800/80 bg-slate-950 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
+              <tr className="border-b border-slate-800/80 bg-slate-950 text-slate-400 font-mono text-[11px] uppercase tracking-wider select-none">
                 <th className="py-3 px-4">CVE ID</th>
+                <th 
+                  className="py-3 px-4 cursor-pointer hover:text-slate-200 transition-colors"
+                  onClick={() => handleSort('risk_score')}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Contextual Risk</span>
+                    {renderSortIcon('risk_score')}
+                  </div>
+                </th>
+                <th 
+                  className="py-3 px-4 cursor-pointer hover:text-slate-200 transition-colors"
+                  onClick={() => handleSort('cvss_score')}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Base CVSS</span>
+                    {renderSortIcon('cvss_score')}
+                  </div>
+                </th>
                 <th className="py-3 px-4">Severity</th>
-                <th className="py-3 px-4">CVSS</th>
                 <th className="py-3 px-4">Target Asset</th>
                 <th className="py-3 px-4">Service / Port</th>
                 <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4">First Seen</th>
+                <th 
+                  className="py-3 px-4 cursor-pointer hover:text-slate-200 transition-colors"
+                  onClick={() => handleSort('first_seen_at')}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Discovered</span>
+                    {renderSortIcon('first_seen_at')}
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/40">
@@ -187,17 +297,18 @@ export default function Vulnerabilities() {
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
                     <td className="py-3.5 px-4"><div className="h-4 w-28 bg-slate-800 rounded" /></td>
-                    <td className="py-3.5 px-4"><div className="h-4 w-20 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-12 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-20 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-32 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-800 rounded" /></td>
-                    <td className="py-3.5 px-4"><div className="h-4 w-16 bg-slate-800 rounded" /></td>
+                    <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-20 bg-slate-800 rounded" /></td>
                   </tr>
                 ))
               ) : vulns.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500">
+                  <td colSpan={8} className="py-12 text-center text-slate-500">
                     <ShieldAlert className="w-8 h-8 mx-auto mb-2 text-slate-600 opacity-50" />
                     <p className="font-medium text-slate-400">No vulnerabilities recorded</p>
                     <p className="text-xs text-slate-600 mt-0.5">
@@ -217,14 +328,19 @@ export default function Vulnerabilities() {
                       {v.cve_id}
                     </td>
 
-                    {/* Severity */}
+                    {/* Contextual Risk Score */}
                     <td className="py-3.5 px-4">
-                      <SeverityBadge severity={v.severity} />
+                      <RiskTierBadge tier={v.risk_tier} score={v.risk_score} />
                     </td>
 
                     {/* CVSS Score */}
                     <td className="py-3.5 px-4 font-mono font-bold text-white">
                       {v.cvss_score.toFixed(1)}
+                    </td>
+
+                    {/* Severity */}
+                    <td className="py-3.5 px-4">
+                      <SeverityBadge severity={v.severity} />
                     </td>
 
                     {/* Target Asset */}
@@ -234,7 +350,7 @@ export default function Vulnerabilities() {
                       </div>
                       {v.asset_ip && (
                         <div className="text-[11px] text-slate-500 font-mono">
-                          {v.asset_ip}
+                          {v.asset_ip} (Crit: {v.asset_criticality || 3})
                         </div>
                       )}
                     </td>
@@ -246,15 +362,32 @@ export default function Vulnerabilities() {
                         <span className="text-slate-500">:{v.port}</span>
                       ) : null}
                       {v.service_version && (
-                        <div className="text-[11px] text-slate-500 font-sans">
+                        <div className="text-[11px] text-slate-500 font-sans truncate max-w-[140px]">
                           v{v.service_version}
                         </div>
                       )}
                     </td>
 
-                    {/* Status */}
-                    <td className="py-3.5 px-4">
-                      <VulnStatusBadge status={v.status} />
+                    {/* Inline Status Dropdown */}
+                    <td className="py-3.5 px-4" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={v.status}
+                        onChange={(e) => handleStatusChange(v.id, e.target.value, e)}
+                        className={`px-2 py-1 rounded text-xs font-mono font-medium border bg-slate-900 focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer ${
+                          v.status === 'open'
+                            ? 'text-rose-400 border-rose-500/30'
+                            : v.status === 'in_progress'
+                            ? 'text-amber-400 border-amber-500/30'
+                            : v.status === 'mitigated'
+                            ? 'text-emerald-400 border-emerald-500/30'
+                            : 'text-slate-400 border-slate-500/30'
+                        }`}
+                      >
+                        <option value="open">Open</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="mitigated">Mitigated</option>
+                        <option value="false_positive">False Positive</option>
+                      </select>
                     </td>
 
                     {/* First Seen */}
@@ -318,9 +451,14 @@ export default function Vulnerabilities() {
                   <SeverityBadge severity={selectedVuln.severity} />
                   <VulnStatusBadge status={selectedVuln.status} />
                 </div>
-                <p className="text-xs text-slate-400 mt-1 font-mono">
-                  Base CVSS Score: <span className="text-white font-bold">{selectedVuln.cvss_score.toFixed(1)}</span>
-                </p>
+                <div className="flex items-center gap-3 mt-1.5">
+                  <span className="text-xs text-slate-400 font-mono">
+                    Contextual Risk: <span className="text-cyan-400 font-bold">{selectedVuln.risk_score.toFixed(2)}</span>
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    Base CVSS: <span className="text-white font-bold">{selectedVuln.cvss_score.toFixed(1)}</span>
+                  </span>
+                </div>
               </div>
 
               <button
@@ -333,23 +471,60 @@ export default function Vulnerabilities() {
 
             {/* Body */}
             <div className="p-6 space-y-5 overflow-y-auto">
+              {/* Risk Score Calculation Breakdown Card */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-mono font-semibold text-white uppercase tracking-wider">
+                    <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Contextual Risk Engine Breakdown</span>
+                  </div>
+                  <RiskTierBadge tier={selectedVuln.risk_tier} score={selectedVuln.risk_score} />
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 text-center font-mono">
+                  <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800/60">
+                    <span className="text-[10px] text-slate-400 uppercase block mb-1">CVSS Component (60%)</span>
+                    <span className="text-sm font-bold text-white">
+                      {(selectedVuln.cvss_score * 0.6).toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">({selectedVuln.cvss_score.toFixed(1)} × 0.6)</span>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800/60">
+                    <span className="text-[10px] text-slate-400 uppercase block mb-1">Asset Weight (40%)</span>
+                    <span className="text-sm font-bold text-white">
+                      {(((selectedVuln.asset_criticality || 3) / 5.0 * 10.0) * 0.4).toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">(Crit {selectedVuln.asset_criticality || 3}/5 × 10 × 0.4)</span>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-cyan-950/30 border border-cyan-800/40">
+                    <span className="text-[10px] text-cyan-400 uppercase block mb-1 font-semibold">Total Risk Score</span>
+                    <span className="text-sm font-bold text-cyan-300">
+                      {selectedVuln.risk_score.toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-cyan-500 block mt-0.5 uppercase font-semibold">{selectedVuln.risk_tier}</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Asset and Port Info Cards */}
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
                   <span className="text-slate-500 font-mono uppercase text-[10px] block mb-1">
-                    Affected Asset
+                    Affected Target Asset
                   </span>
                   <div className="text-slate-200 font-mono font-medium">
                     {selectedVuln.asset_name}
                   </div>
                   <div className="text-slate-400 font-mono text-[11px]">
-                    {selectedVuln.asset_ip}
+                    {selectedVuln.asset_ip} · Criticality {selectedVuln.asset_criticality || 3}/5
                   </div>
                 </div>
 
                 <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
                   <span className="text-slate-500 font-mono uppercase text-[10px] block mb-1">
-                    Port & Service
+                    Port & Service Fingerprint
                   </span>
                   <div className="text-slate-200 font-mono font-medium">
                     {selectedVuln.service || 'Service'} (Port {selectedVuln.port || 'N/A'})

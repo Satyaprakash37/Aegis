@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import api from '../api/client';
 import { 
   Shield, 
   LayoutDashboard, 
@@ -13,11 +14,29 @@ import {
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [criticalHighCount, setCriticalHighCount] = useState(0);
+
+  useEffect(() => {
+    const fetchBadgeData = async () => {
+      try {
+        const res = await api.get('/api/dashboard/summary');
+        if (res.data?.critical_high_count !== undefined) {
+          setCriticalHighCount(res.data.critical_high_count);
+        }
+      } catch (err) {
+        // Silently catch in sidebar if unauthenticated or error
+      }
+    };
+
+    fetchBadgeData();
+    const interval = setInterval(fetchBadgeData, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const navItems = [
     { id: 'dashboard', path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'assets', path: '/assets', label: 'Assets', icon: Server },
-    { id: 'vulnerabilities', path: '/vulns', label: 'Vulnerabilities', icon: ShieldAlert },
+    { id: 'vulnerabilities', path: '/vulns', label: 'Vulnerabilities', icon: ShieldAlert, badge: criticalHighCount },
     { id: 'scans', path: '/scans', label: 'Scans', icon: Activity },
     { id: 'reports', path: '/reports', label: 'Reports', icon: FileText },
   ];
@@ -67,7 +86,12 @@ export default function Sidebar() {
                   isActive ? 'text-cyan-400' : 'text-slate-400 group-hover:text-slate-200'
                 }`}
               />
-              <span>{item.label}</span>
+              <span className="flex-1 text-left">{item.label}</span>
+              {item.badge !== undefined && item.badge > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold rounded-full bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse">
+                  {item.badge}
+                </span>
+              )}
             </button>
           );
         })}

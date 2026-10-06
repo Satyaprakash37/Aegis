@@ -15,6 +15,7 @@ from app.models.asset import Asset
 from app.models.scan import Scan, ScanStatus
 from app.models.vulnerability import Vulnerability, VulnerabilitySeverity, VulnerabilityStatus
 from app.services.enricher.nvd_client import nvd_client
+from app.services.risk.engine import calculate_risk_score
 from app.services.scanner.nmap_runner import ScanExecutionError, run_nmap_scan
 
 logger = logging.getLogger("aegis.pipeline")
@@ -125,9 +126,8 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                     else:
                         title = f"{cve_id}: {cve['description'][:80]}..." if cve.get("description") else cve_id
 
-                        # TODO: Phase 5 will refine risk_score with asset criticality weighting:
-                        # risk_score = round((cvss_score * 0.6) + (((criticality / 5) * 10) * 0.4), 2)
-                        risk_score = float(cvss_score)
+                        # Calculate contextual risk score using asset criticality weighting
+                        risk_score = calculate_risk_score(cvss_score, asset.criticality)
 
                         new_vuln = Vulnerability(
                             scan_id=scan.id,

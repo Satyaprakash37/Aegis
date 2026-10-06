@@ -109,3 +109,25 @@ export function VulnStatusBadge({ status }) {
     </span>
   );
 }
+
+export function RiskTierBadge({ tier, score }) {
+  const t = String(tier || 'NONE').toUpperCase();
+  const configs = {
+    CRITICAL: { label: 'CRITICAL', bg: 'bg-rose-500/15 text-rose-400 border-rose-500/30' },
+    HIGH: { label: 'HIGH', bg: 'bg-orange-500/15 text-orange-400 border-orange-500/30' },
+    MEDIUM: { label: 'MEDIUM', bg: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+    LOW: { label: 'LOW', bg: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
+    NONE: { label: 'NONE', bg: 'bg-slate-500/10 text-slate-400 border-slate-500/30' },
+  };
+
+  const current = configs[t] || configs.NONE;
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-mono font-bold border ${current.bg}`}>
+      <span>{score != null ? Number(score).toFixed(2) : ''}</span>
+      <span className="text-[10px] font-sans font-semibold tracking-wider opacity-80 uppercase">
+        {current.label}
+      </span>
+    </span>
+  );
+}

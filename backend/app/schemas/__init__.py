@@ -25,6 +25,8 @@ from app.schemas.vulnerability import (
     VulnerabilityCreate,
     VulnerabilityRead,
     VulnerabilityListResponse,
+    VulnerabilityStatusUpdate,
+    RiskRecalculateResponse,
 )
 from app.schemas.report import ReportBase, ReportCreate, ReportRead
 
@@ -50,6 +52,8 @@ __all__ = [
     "VulnerabilityCreate",
     "VulnerabilityRead",
     "VulnerabilityListResponse",
+    "VulnerabilityStatusUpdate",
+    "RiskRecalculateResponse",
     "ReportBase",
     "ReportCreate",
     "ReportRead",
