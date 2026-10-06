@@ -183,7 +183,7 @@ export default function Assets() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by asset name, IP address, or hostname..."
+            placeholder="Search by asset name, IP, domain, or hostname..."
             className="w-full pl-10 pr-9 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors font-sans"
           />
           {search && (
@@ -263,7 +263,7 @@ export default function Assets() {
             <thead>
               <tr className="border-b border-slate-800 bg-slate-950/90 text-slate-400 font-mono uppercase text-[11px] tracking-wider">
                 <th className="py-3.5 px-4 font-semibold">Asset Details</th>
-                <th className="py-3.5 px-4 font-semibold">IP Address</th>
+                <th className="py-3.5 px-4 font-semibold">Target / IP</th>
                 <th className="py-3.5 px-4 font-semibold">Type</th>
                 <th className="py-3.5 px-4 font-semibold">Environment</th>
                 <th className="py-3.5 px-4 font-semibold">Criticality</th>
@@ -348,11 +348,26 @@ export default function Assets() {
                       </div>
                     </td>
 
-                    {/* IP Address */}
+                    {/* Target / IP Address */}
                     <td className="py-3.5 px-4">
-                      <span className="font-mono text-xs px-2 py-1 rounded bg-slate-900 border border-slate-800 text-cyan-400">
-                        {asset.ip_address}
-                      </span>
+                      {asset.target_type === 'domain' ? (
+                        <div className="inline-flex flex-col">
+                          <span className="font-mono text-xs px-2 py-0.5 rounded bg-cyan-950/40 border border-cyan-800/40 text-cyan-300 flex items-center gap-1.5 w-fit">
+                            <span>🌐</span>
+                            <span>{asset.ip_address}</span>
+                          </span>
+                          {asset.resolved_ip && (
+                            <span className="text-[10px] font-mono text-slate-400 mt-0.5 pl-1">
+                              ↳ {asset.resolved_ip}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-cyan-400 flex items-center gap-1.5 w-fit">
+                          <span>🖥️</span>
+                          <span>{asset.ip_address}</span>
+                        </span>
+                      )}
                     </td>
 
                     {/* Type */}

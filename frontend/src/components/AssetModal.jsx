@@ -57,9 +57,7 @@ export default function AssetModal({ isOpen, onClose, onSubmit, initialData = nu
       errs.name = 'Asset name is required.';
     }
     if (!formData.ip_address.trim()) {
-      errs.ip_address = 'IP address is required.';
-    } else if (!IPV4_REGEX.test(formData.ip_address.trim())) {
-      errs.ip_address = 'Must be a valid IPv4 address (e.g. 192.168.1.10).';
+      errs.ip_address = 'Target IP address or domain is required.';
     }
     if (!formData.criticality || formData.criticality < 1 || formData.criticality > 5) {
       errs.criticality = 'Criticality must be between 1 and 5.';
@@ -83,9 +81,18 @@ export default function AssetModal({ isOpen, onClose, onSubmit, initialData = nu
       onClose();
     } catch (err) {
       if (err.response?.status === 409) {
-        setApiError(err.response.data?.detail || 'An asset with this IP address already exists.');
+        setApiError(err.response.data?.detail || 'An asset with this target or IP already exists.');
       } else if (err.response?.status === 403) {
         setApiError('Forbidden: Only analyst or admin accounts can perform this action.');
+      } else if (err.response?.status === 422) {
+        const detail = err.response.data?.detail;
+        setApiError(
+          typeof detail === 'string'
+            ? detail
+            : Array.isArray(detail)
+            ? detail.map((d) => d.msg).join(', ')
+            : 'Validation error: Please verify your target format or domain resolution.'
+        );
       } else if (err.response?.data?.detail) {
         setApiError(
           typeof err.response.data.detail === 'string'
@@ -111,7 +118,7 @@ export default function AssetModal({ isOpen, onClose, onSubmit, initialData = nu
               {isEdit ? 'Edit Network Asset' : 'Register New Asset'}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              {isEdit ? `Updating asset specifications` : `Add an infrastructure target to the inventory`}
+              {isEdit ? `Updating asset specifications` : `Add an infrastructure target (IP or domain) to the inventory`}
             </p>
           </div>
           <button
@@ -142,7 +149,7 @@ export default function AssetModal({ isOpen, onClose, onSubmit, initialData = nu
                 required
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g. prod-db-primary"
+                placeholder="e.g. prod-web-server"
                 className={`w-full px-3 py-2 bg-slate-950 border rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors ${
                   errors.name ? 'border-red-500/50' : 'border-slate-800'
                 }`}
@@ -150,23 +157,27 @@ export default function AssetModal({ isOpen, onClose, onSubmit, initialData = nu
               {errors.name && <p className="text-[11px] text-red-400 mt-1">{errors.name}</p>}
             </div>
 
-            {/* IP Address */}
+            {/* Target (IP Address or Domain) */}
             <div>
               <label className="block text-xs font-mono text-slate-300 uppercase tracking-wider mb-1.5">
-                IPv4 Address *
+                Target (IP Address or Domain) *
               </label>
               <input
                 type="text"
                 required
                 value={formData.ip_address}
                 onChange={(e) => setFormData({ ...formData, ip_address: e.target.value })}
-                placeholder="10.0.4.15"
+                placeholder="192.168.1.1 or example.com"
                 className={`w-full px-3 py-2 bg-slate-950 border rounded-lg text-sm text-white font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors ${
                   errors.ip_address ? 'border-red-500/50' : 'border-slate-800'
                 }`}
               />
-              {errors.ip_address && (
+              {errors.ip_address ? (
                 <p className="text-[11px] text-red-400 mt-1">{errors.ip_address}</p>
+              ) : (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Supports IPv4 (192.168.1.1), domain (example.com), or URL (https://...).
+                </p>
               )}
             </div>
           </div>

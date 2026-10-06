@@ -27,6 +27,12 @@ class AssetEnvironment(str, enum.Enum):
     dev = "dev"
 
 
+class TargetType(str, enum.Enum):
+    """Asset target specification type."""
+    ip = "ip"
+    domain = "domain"
+
+
 class Asset(Base, TimestampMixin):
     """Network asset entity registered for vulnerability tracking."""
 
@@ -34,7 +40,14 @@ class Asset(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    ip_address: Mapped[str] = mapped_column(String(45), unique=True, index=True, nullable=False)
+    ip_address: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    target_type: Mapped[TargetType] = mapped_column(
+        Enum(TargetType, name="target_type_enum", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=TargetType.ip,
+        server_default="ip",
+    )
+    resolved_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     asset_type: Mapped[AssetType] = mapped_column(
         Enum(AssetType, name="asset_type_enum", values_callable=lambda obj: [e.value for e in obj]),

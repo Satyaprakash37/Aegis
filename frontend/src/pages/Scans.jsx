@@ -216,7 +216,7 @@ export default function Scans() {
                 ) : (
                   assets.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.name} — {a.ip_address} ({a.asset_type})
+                      {a.name} — {a.target_type === 'domain' ? `🌐 ${a.ip_address} (IP: ${a.resolved_ip || 'resolved'})` : `🖥️ ${a.ip_address}`} ({a.asset_type})
                     </option>
                   ))
                 )}
@@ -414,11 +414,17 @@ export default function Scans() {
                   >
                     {/* Target Asset */}
                     <td className="py-3.5 px-4">
-                      <div className="font-medium text-white font-mono flex items-center gap-2">
+                      <div className="font-medium text-white font-mono flex items-center gap-2 flex-wrap">
                         <span>{scan.asset_name}</span>
                         {scan.asset_ip && (
-                          <span className="text-[11px] text-cyan-400/80 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/30">
-                            {scan.asset_ip}
+                          <span className="text-[11px] text-cyan-300 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/30 flex items-center gap-1">
+                            {scan.target_type === 'domain' ? <span>🌐</span> : <span>🖥️</span>}
+                            <span>{scan.asset_ip}</span>
+                          </span>
+                        )}
+                        {scan.target_type === 'domain' && scan.resolved_ip && (
+                          <span className="text-[10px] font-mono text-slate-400">
+                            ↳ {scan.resolved_ip}
                           </span>
                         )}
                       </div>

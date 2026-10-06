@@ -46,7 +46,9 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 ### `assets`
 - `id` (PK, UUID / Integer)
 - `name` (String)
-- `ip_address` (String, Unique, Indexed)
+- `ip_address` (String(255), Unique, Indexed - target IP address or domain name)
+- `target_type` (Enum: `ip`, `domain`, default `ip`)
+- `resolved_ip` (String(45), Nullable - auto-resolved IPv4 for domain targets)
 - `hostname` (String, Nullable)
 - `asset_type` (Enum: `server`, `web`, `db`, `network`)
 - `environment` (Enum: `production`, `staging`, `dev`)
@@ -121,6 +123,14 @@ $$\text{danger\_score} = \text{round}\left((\text{cvss\_score} \times 0.40) + (\
 - **Medium:** $4.0 \le \text{CVSS} \le 6.9$
 - **Low:** $0.1 \le \text{CVSS} \le 3.9$
 - **None:** $\text{CVSS} = 0.0$
+
+### D. Target Resolution & DNS Discovery Engine (Phase 8.1)
+Normalizes, validates, and automatically resolves diverse network target specifications:
+- **URL/Scheme Cleaning:** Strips protocols (`http://`, `https://`), userinfo, URL paths, query parameters, fragment identifiers, and port designations (e.g. `https://example.com:8080/path` $\rightarrow$ `example.com`).
+- **Target Type Discrimination:** Distinguishes attempted IPv4 addresses (all numeric dot-segments) from RFC-compliant hostnames/domains.
+- **Dynamic DNS Resolution:** Leverages `socket.getaddrinfo` to resolve domain targets to live IPv4 addresses, populating `resolved_ip` while preserving original domain branding.
+- **Cross-Target Conflict Detection:** Detects duplicates bidirectionally across `ip_address` and `resolved_ip` (prevents registering domain targets whose resolved IP is already monitored, and vice versa).
+- **Scanner Execution Target:** Scanner engine directs Nmap and Nuclei probes to the resolved IP while attributing findings to the parent domain identity.
 
 ---
 
@@ -226,6 +236,7 @@ Deep scanning moves beyond probabilistic banner matching to active, evidence-bac
 - **Phase 6:** Report generation engine (PDF/Excel) + Reports UI.
 - **Phase 7:** Platform polish, database seeding script, comprehensive documentation & testing.
 - **Phase 8:** Deep Active Vulnerability Scanning + Active Verification Engine (Nmap NSE + Nuclei v3) + Threat Danger Assessment Engine.
+- **Phase 8.1:** Domain & URL Target Support with Automatic DNS Resolution, Bidirectional Conflict Detection, and Visual 🌐/🖥️ Indicators.
 
 ---
 

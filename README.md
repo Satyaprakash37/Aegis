@@ -75,6 +75,13 @@ Dark SOC theme with JWT role-based access control, account lockout protection, a
   - Evaluates ease of exploitation (weaponized public exploit, Metasploit integration, remote vs local).
   - Assesses blast radius and threat impact (Remote Code Execution, Privilege Escalation, SQLi, Authentication Bypass, Information Disclosure).
   - Flags weaponized exploits with 🔥 in tables and SOC dashboards.
+- **Domain & URL Target Support with Auto DNS Resolution (Phase 8.1):**
+  - **Flexible Ingestion:** Accepts IPv4 addresses, domain hostnames (`example.com`), and complete URLs (`https://example.com:8080/api`).
+  - **URL Normalization:** Automatically strips protocols, userinfo, paths, queries, and port suffixes.
+  - **Dynamic DNS Resolution:** Resolves domains to IPv4 addresses via `socket.getaddrinfo`, caching `resolved_ip` in the database.
+  - **Bidirectional Deduplication:** Prevents duplicate registrations whether an asset is registered by domain, URL, or its resolved IP.
+  - **Adaptive Scan Routing:** Scanner pipelines (Quick, Full, Deep) seamlessly target the live resolved IP while attributing all telemetry to the parent domain.
+  - **Visual SOC Indicators:** Dedicated 🌐 domain badges with resolved IP subtitles and 🖥️ hardware host icons in the UI.
 - **Automated Network Port & Service Discovery:** Asynchronous Nmap engine executing Quick (top 100 ports), Full (ports 1-1000), and Deep (active proof) scans in non-blocking worker threads.
 - **Threat Intelligence Enrichment:** Seamless NVD API 2.0 integration correlating CPE banners, service names, and versions directly to official CVE records with CVSS v3.1 scores.
 - **Contextual Composite Risk Engine:** Eliminates alert fatigue by weighting technical severity against organizational asset criticality.

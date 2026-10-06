@@ -22,6 +22,8 @@ class ScanRead(BaseModel):
     asset_id: int
     asset_name: Optional[str] = None
     asset_ip: Optional[str] = None
+    target_type: Optional[str] = None
+    resolved_ip: Optional[str] = None
     scan_type: ScanType
     status: ScanStatus
     started_at: Optional[datetime] = None

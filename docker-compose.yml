@@ -37,6 +37,7 @@ services:
     volumes:
       - ./backend/reports:/app/reports
       - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
 
   frontend:
     build:

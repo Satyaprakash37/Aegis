@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.db.session import AsyncSessionLocal
-from app.models.asset import Asset
+from app.models.asset import Asset, TargetType
 from app.models.scan import Scan, ScanStatus, ScanType
 from app.models.vulnerability import (
     Vulnerability,
@@ -50,7 +50,17 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             return
 
         try:
-            logger.info(f"Initiating pipeline for Scan #{scan.id} (type: {scan.scan_type.value}) on {asset.name} ({asset.ip_address})")
+            # Determine actual network target (resolved IP for domain targets)
+            scan_target = (
+                asset.resolved_ip
+                if (asset.target_type == TargetType.domain and asset.resolved_ip)
+                else asset.ip_address
+            )
+
+            logger.info(
+                f"Initiating pipeline for Scan #{scan.id} (type: {scan.scan_type.value}) "
+                f"on {asset.name} (target: {asset.ip_address}, scanning: {scan_target})"
+            )
             scan.status = ScanStatus.running
             scan.started_at = datetime.now(timezone.utc)
             await db.commit()
@@ -59,12 +69,12 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             active_verified_findings: List[Dict[str, Any]] = []
 
             if is_deep:
-                # Execute three-stage deep scan
-                ports, active_verified_findings = await run_deep_scan(asset.ip_address)
+                # Execute three-stage deep scan against resolved IP
+                ports, active_verified_findings = await run_deep_scan(scan_target)
             else:
-                # Execute standard Nmap port scan (quick or full)
+                # Execute standard Nmap port scan (quick or full) against resolved IP
                 ports = await run_nmap_scan(
-                    ip_address=asset.ip_address,
+                    ip_address=scan_target,
                     scan_type=scan.scan_type.value,
                 )
 
@@ -80,7 +90,10 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             )
 
             scan.raw_output = {
-                "target_ip": asset.ip_address,
+                "target": asset.ip_address,
+                "target_type": asset.target_type.value if hasattr(asset.target_type, "value") else str(asset.target_type),
+                "target_ip": scan_target,
+                "resolved_ip": asset.resolved_ip,
                 "target_hostname": asset.hostname,
                 "scan_type": scan.scan_type.value,
                 "ports_discovered": len(ports),

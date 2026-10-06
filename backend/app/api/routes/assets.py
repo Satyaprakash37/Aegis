@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_admin, require_analyst_or_admin
 from app.db.session import get_db
-from app.models.asset import Asset, AssetEnvironment, AssetType
+from app.models.asset import Asset, AssetEnvironment, AssetType, TargetType
 from app.models.user import User
+from app.services.scanner.target_resolver import resolve_target
 from app.schemas.asset import (
     AssetCreate,
     AssetDetailRead,
@@ -28,20 +29,49 @@ async def create_asset(
     current_user: Annotated[User, Depends(require_analyst_or_admin)],
 ) -> Asset:
     """Create a new network asset. Requires analyst or admin role."""
-    # Check for duplicate IP address
-    existing_ip_query = await db.execute(
-        select(Asset).where(Asset.ip_address == asset_in.ip_address)
+    # Resolve target format (IPv4, domain name, or URL)
+    resolution = resolve_target(asset_in.ip_address)
+    if resolution["type"] == "invalid":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=resolution["error"],
+        )
+
+    cleaned_target = resolution["target"]
+    resolved_ip = resolution["ip"] if resolution["type"] == "domain" else None
+    effective_ip = resolution["ip"]
+    target_type = TargetType.domain if resolution["type"] == "domain" else TargetType.ip
+
+    # Check for duplicate IP or domain target
+    duplicate_conditions = [
+        Asset.ip_address == cleaned_target,
+        Asset.resolved_ip == cleaned_target,
+    ]
+    if resolved_ip:
+        duplicate_conditions.extend([
+            Asset.ip_address == resolved_ip,
+            Asset.resolved_ip == resolved_ip,
+        ])
+
+    existing_query = await db.execute(
+        select(Asset).where(or_(*duplicate_conditions))
     )
-    if existing_ip_query.scalar_one_or_none() is not None:
+    existing_asset = existing_query.scalar_one_or_none()
+    if existing_asset is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"An asset with IP address '{asset_in.ip_address}' already exists.",
+            detail=(
+                f"An asset with target '{cleaned_target}' or IP '{effective_ip}' "
+                f"already exists (Asset '{existing_asset.name}', ID: {existing_asset.id})."
+            ),
         )
 
     db_asset = Asset(
         name=asset_in.name,
-        ip_address=asset_in.ip_address,
-        hostname=asset_in.hostname,
+        ip_address=cleaned_target,
+        target_type=target_type,
+        resolved_ip=resolved_ip,
+        hostname=asset_in.hostname or resolution["hostname"],
         asset_type=asset_in.asset_type,
         environment=asset_in.environment,
         criticality=asset_in.criticality,
@@ -77,6 +107,7 @@ async def list_assets(
             Asset.name.ilike(f"%{search}%"),
             Asset.ip_address.ilike(f"%{search}%"),
             Asset.hostname.ilike(f"%{search}%"),
+            Asset.resolved_ip.ilike(f"%{search}%"),
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
@@ -149,6 +180,8 @@ async def get_asset(
         id=asset.id,
         name=asset.name,
         ip_address=asset.ip_address,
+        target_type=asset.target_type,
+        resolved_ip=asset.resolved_ip,
         hostname=asset.hostname,
         asset_type=asset.asset_type,
         environment=asset.environment,
@@ -178,20 +211,51 @@ async def update_asset(
             detail=f"Asset with ID {id} not found.",
         )
 
-    # Check duplicate IP if IP is modified
-    if asset_update.ip_address and asset_update.ip_address != asset.ip_address:
-        duplicate_query = await db.execute(
-            select(Asset).where(
-                Asset.ip_address == asset_update.ip_address,
-                Asset.id != id,
-            )
-        )
-        if duplicate_query.scalar_one_or_none() is not None:
+    # Check and resolve target if target/IP is modified
+    if asset_update.ip_address is not None and asset_update.ip_address.strip():
+        resolution = resolve_target(asset_update.ip_address)
+        if resolution["type"] == "invalid":
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"An asset with IP address '{asset_update.ip_address}' already exists.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=resolution["error"],
             )
-        asset.ip_address = asset_update.ip_address
+
+        cleaned_target = resolution["target"]
+        resolved_ip = resolution["ip"] if resolution["type"] == "domain" else None
+        effective_ip = resolution["ip"]
+        target_type = TargetType.domain if resolution["type"] == "domain" else TargetType.ip
+
+        if cleaned_target != asset.ip_address:
+            duplicate_conditions = [
+                Asset.ip_address == cleaned_target,
+                Asset.resolved_ip == cleaned_target,
+            ]
+            if resolved_ip:
+                duplicate_conditions.extend([
+                    Asset.ip_address == resolved_ip,
+                    Asset.resolved_ip == resolved_ip,
+                ])
+
+            duplicate_query = await db.execute(
+                select(Asset).where(
+                    or_(*duplicate_conditions),
+                    Asset.id != id,
+                )
+            )
+            existing_asset = duplicate_query.scalar_one_or_none()
+            if existing_asset is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"An asset with target '{cleaned_target}' or IP '{effective_ip}' "
+                        f"already exists (Asset '{existing_asset.name}', ID: {existing_asset.id})."
+                    ),
+                )
+            asset.ip_address = cleaned_target
+            asset.target_type = target_type
+            asset.resolved_ip = resolved_ip
+            if not asset.hostname and resolution["hostname"]:
+                asset.hostname = resolution["hostname"]
 
     if asset_update.name is not None:
         asset.name = asset_update.name
