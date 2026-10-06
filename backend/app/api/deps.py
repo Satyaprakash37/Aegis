@@ -1,7 +1,6 @@
 """API Dependency injection providers for database sessions and authentication."""
 
-from collections.abc import AsyncGenerator
-from typing import Annotated
+from typing import Annotated, List
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -62,19 +61,25 @@ async def get_current_active_user(
     return current_user
 
 
-def require_role(required_role: UserRole):
-    """Factory dependency for role validation."""
-    async def role_checker(
-        current_user: Annotated[User, Depends(get_current_user)],
-    ) -> User:
-        if current_user.role != required_role and current_user.role != UserRole.admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Operation requires {required_role.value} privileges",
-            )
-        return current_user
-
-    return role_checker
+async def require_analyst_or_admin(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Ensure user is either analyst or admin."""
+    if current_user.role not in [UserRole.admin, UserRole.analyst]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operation requires analyst or admin privileges",
+        )
+    return current_user
 
 
-require_admin = require_role(UserRole.admin)
+async def require_admin(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Ensure user has admin privileges."""
+    if current_user.role != UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operation requires admin privileges",
+        )
+    return current_user

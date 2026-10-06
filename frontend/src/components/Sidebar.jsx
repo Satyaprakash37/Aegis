@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   Shield, 
   LayoutDashboard, 
@@ -6,23 +7,28 @@ import {
   ShieldAlert, 
   Activity, 
   FileText,
-  Terminal,
   Cpu
 } from 'lucide-react';
 
-export default function Sidebar({ currentNav, setCurrentNav }) {
+export default function Sidebar() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'assets', label: 'Assets', icon: Server },
-    { id: 'vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
-    { id: 'scans', label: 'Scans', icon: Activity },
-    { id: 'reports', label: 'Reports', icon: FileText },
+    { id: 'dashboard', path: '/', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'assets', path: '/assets', label: 'Assets', icon: Server },
+    { id: 'vulnerabilities', path: '/vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
+    { id: 'scans', path: '/scans', label: 'Scans', icon: Activity },
+    { id: 'reports', path: '/reports', label: 'Reports', icon: FileText },
   ];
 
   return (
-    <aside className="w-64 bg-slate-950/80 backdrop-blur-md border-r border-slate-800 flex flex-col h-screen select-none">
+    <aside className="w-64 bg-slate-950/80 backdrop-blur-md border-r border-slate-800 flex flex-col h-screen select-none shrink-0">
       {/* Brand Header */}
-      <div className="h-16 flex items-center px-6 gap-3 border-b border-slate-800/80 bg-slate-950">
+      <div 
+        onClick={() => navigate('/')}
+        className="h-16 flex items-center px-6 gap-3 border-b border-slate-800/80 bg-slate-950 cursor-pointer"
+      >
         <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
           <Shield className="w-5 h-5 text-cyan-400" />
         </div>
@@ -41,12 +47,12 @@ export default function Sidebar({ currentNav, setCurrentNav }) {
         </div>
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = currentNav === item.id;
+          const isActive = location.pathname === item.path;
           return (
             <button
               key={item.id}
-              onClick={() => setCurrentNav(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 group relative ${
+              onClick={() => navigate(item.path)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 group relative cursor-pointer ${
                 isActive
                   ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.12)]'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
