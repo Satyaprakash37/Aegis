@@ -345,6 +345,13 @@ Professional external scanning must unmask virtual hosts and backend services ob
   - **Full Platform QA Suite**:
     - Automated Playwright end-to-end audit covering Auth (`/login`), Assets (`/assets`), Scans (`/scans`), Vulnerabilities (`/vulns`), Reports (`/reports`), and 404 handler (`/404`) with 0 console errors detected.
 
+- **Infrastructure & Scan Launch Path Hardening**:
+  - **Docker Compose Container Lifecycle**: Standardized `restart: unless-stopped` on all 4 containers (`postgres`, `backend`, `frontend`, `juice-shop`). Prevented standalone container naming collisions.
+  - **DNS Resolution Engine**: Configured upstream public DNS resolvers (`8.8.8.8`, `1.1.1.1`) in `docker-compose.yml` to prevent Docker internal resolver `127.0.0.11` from returning `SERVFAIL` on external domain lookups and NVD NIST API queries.
+  - **Dual-Layer DNS Fallback**: `target_resolver.py` augmented with secondary subprocess resolution on `gaierror`, plus database fallback to existing asset records.
+  - **Stuck Scan Startup Recovery**: Application `lifespan` automatically identifies and marks lingering/stalled scans from prior server terminations as failed with actionable hints.
+  - **Active Scan Staleness Pruning**: Scan launch routes auto-recover active scans older than 1 hour, preventing indefinite HTTP 409 lockout.
+
 ---
 
 ## 9. Operating Rules

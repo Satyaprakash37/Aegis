@@ -153,7 +153,37 @@ def resolve_target(input_string: Optional[str]) -> Dict[str, Any]:
         }
     except socket.gaierror as e:
         err_msg = e.strerror if hasattr(e, "strerror") and e.strerror else str(e)
-        logger.warning(f"DNS resolution failed for '{cleaned_lower}': {err_msg}")
+        logger.warning(f"Primary DNS resolution failed for '{cleaned_lower}': {err_msg}. Attempting fallback...")
+
+        # Secondary attempt: query via system nslookup using 8.8.8.8 if local container resolver failed
+        fallback_ip = None
+        try:
+            import subprocess
+            proc = subprocess.run(
+                ["nslookup", cleaned_lower, "8.8.8.8"],
+                capture_output=True,
+                text=True,
+                timeout=4,
+            )
+            if proc.returncode == 0:
+                matches = re.findall(r"Address:\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", proc.stdout)
+                candidates = [m for m in matches if m != "8.8.8.8"]
+                if candidates:
+                    fallback_ip = candidates[0]
+        except Exception as fb_err:
+            logger.debug(f"Fallback DNS attempt error: {fb_err}")
+
+        if fallback_ip:
+            logger.info(f"Fallback DNS resolution succeeded for '{cleaned_lower}' -> {fallback_ip}")
+            return {
+                "type": "domain",
+                "ip": fallback_ip,
+                "hostname": cleaned_lower,
+                "target": cleaned_lower,
+                "original": original,
+                "error": None,
+            }
+
         return {
             "type": "invalid",
             "ip": None,

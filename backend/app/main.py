@@ -24,9 +24,14 @@ logging.basicConfig(
 logger = logging.getLogger("aegis")
 
 
+from datetime import datetime, timezone
+from sqlalchemy import select
+from app.db.session import AsyncSessionLocal
+from app.models.scan import Scan, ScanStatus
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle manager: Validate configuration and fail-fast on insecure settings."""
+    """Lifecycle manager: Validate configuration, recover interrupted scans, and fail-fast on insecure settings."""
     logger.info("Initializing AEGIS SecOps Core v%s...", settings.VERSION)
 
     # Fail fast if SECRET_KEY is missing or dangerously insecure
@@ -36,6 +41,32 @@ async def lifespan(app: FastAPI):
 
     if settings.SECRET_KEY == "change_this_to_a_secure_random_string_in_production":
         logger.warning("SECURITY WARNING: Using default development SECRET_KEY. Ensure a cryptographically secure key is used in production!")
+
+    # Startup recovery routine: mark any lingering/stuck scans from previous runs as failed
+    try:
+        now_utc = datetime.now(timezone.utc)
+        async with AsyncSessionLocal() as db:
+            query = select(Scan).where(Scan.status.in_([ScanStatus.pending, ScanStatus.running]))
+            result = await db.execute(query)
+            stuck_scans = result.scalars().all()
+            if stuck_scans:
+                logger.warning(
+                    "Detected %d stuck scan(s) from previous session. Marking as interrupted/failed...",
+                    len(stuck_scans),
+                )
+                for s in stuck_scans:
+                    s.status = ScanStatus.failed
+                    s.completed_at = now_utc
+                    s.raw_output = {
+                        "error": "Scan execution interrupted by platform service restart or process termination.",
+                        "error_type": "SystemInterruptionError",
+                        "error_hint": "Restart the scan now that the platform services are fully operational.",
+                        "failure_stage": "interrupted",
+                    }
+                await db.commit()
+                logger.info("Recovered %d orphaned scan(s) cleanly.", len(stuck_scans))
+    except Exception as e:
+        logger.error("Failed to run startup stuck-scan recovery: %s", e)
 
     logger.info("Security hardening verified. Platform ready.")
     yield

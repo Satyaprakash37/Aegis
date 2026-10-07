@@ -1,6 +1,6 @@
 """Scan management and execution routes."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Annotated, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -43,10 +43,41 @@ async def create_direct_scan(
     # 1. Run resolve_target on input
     resolution = resolve_target(scan_in.target)
     if resolution["type"] == "invalid":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=resolution["error"],
+        # Check if input matches an existing registered asset as fallback
+        cleaned_input = (
+            scan_in.target.strip()
+            .lower()
+            .replace("http://", "")
+            .replace("https://", "")
+            .rstrip("/")
         )
+        fallback_query = await db.execute(
+            select(Asset).where(
+                or_(
+                    Asset.name == cleaned_input,
+                    Asset.ip_address == cleaned_input,
+                    Asset.resolved_ip == cleaned_input,
+                )
+            )
+        )
+        fallback_asset = fallback_query.scalar_one_or_none()
+        if fallback_asset:
+            logger.info(
+                f"Target resolution fallback: found existing asset #{fallback_asset.id} for '{scan_in.target}'."
+            )
+            resolution = {
+                "type": "domain" if fallback_asset.target_type == TargetType.domain else "ip",
+                "ip": fallback_asset.resolved_ip or fallback_asset.ip_address,
+                "hostname": fallback_asset.hostname or fallback_asset.name,
+                "target": fallback_asset.ip_address,
+                "original": scan_in.target,
+                "error": None,
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=resolution["error"],
+            )
 
     cleaned_target = resolution["target"]
     resolved_ip = resolution["ip"] if resolution["type"] == "domain" else None
@@ -101,10 +132,27 @@ async def create_direct_scan(
     )
     active_scan = active_scan_query.scalar_one_or_none()
     if active_scan:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"A scan (Scan #{active_scan.id}, {active_scan.scan_type.value}) is already active on '{asset.name}'. Please allow it to finish before starting a new scan.",
-        )
+        now_utc = datetime.now(timezone.utc)
+        scan_age = (now_utc - active_scan.started_at) if active_scan.started_at else timedelta(hours=2)
+        if scan_age > timedelta(hours=1):
+            logger.warning(
+                "Auto-recovering stale active scan #%d on asset #%d (age: %s)",
+                active_scan.id, asset.id, scan_age
+            )
+            active_scan.status = ScanStatus.failed
+            active_scan.completed_at = now_utc
+            active_scan.raw_output = {
+                "error": "Scan execution timed out or was interrupted by a previous restart.",
+                "error_type": "ScanTimeoutError",
+                "error_hint": "New scan was launched to supersede the stalled execution.",
+                "failure_stage": "timeout",
+            }
+            await db.commit()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A scan (Scan #{active_scan.id}, {active_scan.scan_type.value}) is already active on '{asset.name}'. Please allow it to finish before starting a new scan.",
+            )
 
     # 5. Initialize scan
     new_scan = Scan(
@@ -162,10 +210,27 @@ async def create_scan(
     )
     active_scan = active_scan_query.scalar_one_or_none()
     if active_scan:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"A scan (Scan #{active_scan.id}, {active_scan.scan_type.value}) is already active on '{asset.name}'. Please allow it to finish before starting a new scan.",
-        )
+        now_utc = datetime.now(timezone.utc)
+        scan_age = (now_utc - active_scan.started_at) if active_scan.started_at else timedelta(hours=2)
+        if scan_age > timedelta(hours=1):
+            logger.warning(
+                "Auto-recovering stale active scan #%d on asset #%d (age: %s)",
+                active_scan.id, asset.id, scan_age
+            )
+            active_scan.status = ScanStatus.failed
+            active_scan.completed_at = now_utc
+            active_scan.raw_output = {
+                "error": "Scan execution timed out or was interrupted by a previous restart.",
+                "error_type": "ScanTimeoutError",
+                "error_hint": "New scan was launched to supersede the stalled execution.",
+                "failure_stage": "timeout",
+            }
+            await db.commit()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A scan (Scan #{active_scan.id}, {active_scan.scan_type.value}) is already active on '{asset.name}'. Please allow it to finish before starting a new scan.",
+            )
 
     # Initialize pending scan record
     new_scan = Scan(
