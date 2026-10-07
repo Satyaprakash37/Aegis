@@ -352,6 +352,24 @@ Professional external scanning must unmask virtual hosts and backend services ob
   - **Stuck Scan Startup Recovery**: Application `lifespan` automatically identifies and marks lingering/stalled scans from prior server terminations as failed with actionable hints.
   - **Active Scan Staleness Pruning**: Scan launch routes auto-recover active scans older than 1 hour, preventing indefinite HTTP 409 lockout.
 
+- **Phase 8.6: Scanner Intelligence, Firewall Evasion & Deep Service Fingerprinting**:
+  - **Issue 1: Version Parsing Intelligence & False Positive Elimination**:
+    - *MariaDB / MySQL Segregation*: Detects MySQL protocol `5.5.5-` compatibility prefix on MariaDB instances; extracts true release version (e.g. `10.6.28`) and canonical product `MariaDB`. Filters out ancient Oracle MySQL 5.5 CVEs (e.g. `CVE-2016-3615`) from being attributed to modern MariaDB.
+    - *Temporal Guard (Minimum Version Guard)*: Prevents historical CVEs published $>4$ years prior to a software major branch launch from matching (e.g. 2001/2004/2012 CVEs blocked on MariaDB 10.6 and PowerDNS 5.1).
+    - *Generic Service Blacklist*: Prevents bare keyword queries against NVD on generic port services without concrete versions (`submission`, `smtps`, `domain`, `http`), eliminating 2002-era Sendmail/Mutt/WebSight false positives.
+    - *Version Upper-Bound Validation*: Regex-checks CVE advisory vulnerability text bounds (`before X.Y`, `<= X.Y`) against detected major versions.
+  - **Issue 2: Firewall Evasion & Deep Fingerprinting Engine**:
+    - *Smart Host Discovery*: Strict `-Pn` across all scanning pipelines. Added `--disable-arp-ping` to eliminate false positive local-network dropouts.
+    - *TCP ACK Scan (`-sA`) Reachability Fallback*: If initial connect scans encounter 0 open ports, executes an ACK scan fallback to differentiate stateful firewall drops from live hosts returning TCP RSTs.
+    - *Evasion Packet Shaping*: Integrated `-f` (fragmentation), `--data-length 24` (packet padding), and `-T2` stealth timing on retry attempts for full and deep scans.
+    - *Targeted Socket Handshake Probing*: Custom socket protocol parsers for unspecified/generic service banners:
+      - Port 3306: Parses MySQL/MariaDB `Protocol::HandshakeV10` greeting packet without credentials.
+      - Port 21: Extracts FTP `220` daemon greeting banners (`Pure-FTPd`, `vsftpd`, `ProFTPD`).
+      - Port 80/443: Direct socket HTTP `HEAD` / `Server` header grab + fallback to `httpx` tech detection.
+    - *Anti-WAF Tuning*: Tuned Nuclei to `-rl 25` and `-concurrency 15`; parses WAF signatures (`BitNinja`, `Cloudflare`, `ModSecurity`, `Incapsula`) into reconnaissance telemetry.
+  - **Issue 3: Port Coverage Expansion**:
+    - Expanded Deep Recon port scanning from top 500 ports to top 1000 ports plus critical infrastructure port list (`21,22,23,25,53,80,110,111,135,139,143,443,445,465,587,993,995,1433,1521,2049,3306,3389,5432,5900,6379,8080,8443,8888,9090,27017,61616`).
+
 ---
 
 ## 9. Operating Rules

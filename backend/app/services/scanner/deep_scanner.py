@@ -23,9 +23,25 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import nmap
 
 from app.models.vulnerability import VulnerabilitySeverity, VerificationType
-from app.services.scanner.nmap_runner import ScanExecutionError
+from app.services.scanner.nmap_runner import (
+    ScanExecutionError,
+    CRITICAL_PORTS,
+    _enrich_open_ports_fingerprint,
+)
 
 logger = logging.getLogger("aegis.scanner.deep")
+
+WAF_SIGNATURES: List[Tuple[str, str]] = [
+    ("bitninja", "BitNinja WAF"),
+    ("cloudflare", "Cloudflare WAF"),
+    ("modsecurity", "ModSecurity WAF"),
+    ("incapsula", "Imperva Incapsula WAF"),
+    ("wordfence", "Wordfence WAF"),
+    ("sucuri", "Sucuri CloudProxy WAF"),
+    ("aws waf", "AWS WAF"),
+    ("akamai", "Akamai Kona Site Defender"),
+    ("f5 big-ip", "F5 BIG-IP ASM"),
+]
 
 # Mapping of known NSE scripts to CVEs and titles
 NSE_SCRIPT_CVE_MAP: Dict[str, Dict[str, Any]] = {
@@ -231,6 +247,14 @@ def _run_stage2_live_probing(
                 host_ips = rec.get("a") or []
                 main_ip = rec.get("host_ip") or (host_ips[0] if host_ips else "")
 
+                # Detect WAF signatures in webserver, cdn_name, or detected technologies
+                host_waf = None
+                combined_host_str = f"{webserver} {cdn_name} {' '.join(rec.get('tech') or [])}".lower()
+                for sig_key, sig_label in WAF_SIGNATURES:
+                    if sig_key in combined_host_str:
+                        host_waf = sig_label
+                        break
+
                 live_hosts.append({
                     "url": url,
                     "title": rec.get("title") or rec.get("host") or domain,
@@ -242,6 +266,7 @@ def _run_stage2_live_probing(
                     "cdn": is_cdn,
                     "cdn_name": cdn_name,
                     "webserver": rec.get("webserver") or "",
+                    "waf": host_waf,
                 })
             except Exception:
                 continue
@@ -281,8 +306,12 @@ def _run_stage3_port_scan_single_ip(
     nse_findings: List[Dict[str, Any]] = []
 
     try:
-        # CDN IPs scanned light (top 100), real origin IPs scanned deep (top 500)
-        port_args = "-sV --top-ports 100 -T4 --host-timeout 3m" if is_cdn else "-sV --top-ports 500 -T4 --host-timeout 5m"
+        # CDN IPs scanned light (top 100), real origin IPs scanned deep (top 1000 + critical port coverage)
+        port_args = (
+            "-sT -sV -Pn --top-ports 100 -T4 --version-intensity 7 --host-timeout 3m"
+            if is_cdn
+            else f"-sT -sV -Pn -p 1-1000,{CRITICAL_PORTS} -T4 -f --data-length 24 --version-intensity 7 --script-timeout 30s --host-timeout 5m"
+        )
         logger.info(f"[STAGE 3] Port scanning {ip} (is_cdn={is_cdn}, args='{port_args}')")
         nm.scan(hosts=ip, arguments=port_args)
 
@@ -306,10 +335,17 @@ def _run_stage3_port_scan_single_ip(
                         "cpe": pdata.get("cpe", ""),
                     })
 
+        # Deep version fingerprinting for unspecified/generic versions
+        if open_ports:
+            _enrich_open_ports_fingerprint(ip, open_ports)
+
         # Run NSE script vuln only on real backend servers with open ports
         if not is_cdn and open_ports:
             port_spec = ",".join(str(p["port"]) for p in open_ports[:15])
-            nse_args = f"-sV --script vuln -p {port_spec} -T4 --host-timeout 5m --script-timeout 30s"
+            nse_args = (
+                f"-sT -sV -Pn --script vuln -p {port_spec} -T4 -f --data-length 24 "
+                f"--version-intensity 7 --host-timeout 5m --script-timeout 30s"
+            )
             logger.info(f"[STAGE 3] Executing Nmap NSE scripts on {ip}:{port_spec}")
             nm.scan(hosts=ip, arguments=nse_args)
 
@@ -458,8 +494,8 @@ def _run_stage4_nuclei_target(
         "-silent",
         "-jsonl",
         "-timeout", "10",
-        "-rl", "50",
-        "-concurrency", "25",
+        "-rl", "25",
+        "-concurrency", "15",
         "-max-host-error", "10",
     ]
 
@@ -927,10 +963,12 @@ async def run_deep_scan(
             all_tech.add(t)
 
     cdn_name = None
+    waf_name = None
     for h in live_hosts:
-        if h.get("cdn"):
+        if not cdn_name and h.get("cdn"):
             cdn_name = h.get("cdn")
-            break
+        if not waf_name and h.get("waf"):
+            waf_name = h.get("waf")
 
     recon_summary: Dict[str, Any] = {
         "is_domain": is_domain,
@@ -942,6 +980,8 @@ async def run_deep_scan(
         "live_hosts_found": len(live_hosts),
         "cdn_detected": any(h.get("cdn") for h in live_hosts),
         "cdn_name": cdn_name,
+        "waf_detected": bool(waf_name),
+        "waf_name": waf_name,
         "backend_ips": target_ips,
         "ssl_audited_count": len(ssl_targets),
         "technologies_summary": sorted(list(all_tech)),

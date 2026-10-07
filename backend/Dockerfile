@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     openssl \
     procps \
+    sudo \
     dnsutils \
     bsdextrautils \
     bsdmainutils \
@@ -56,7 +57,11 @@ RUN mkdir -p /home/appuser /nuclei-templates && \
     adduser --system --uid 1001 --ingroup appgroup --home /home/appuser appuser && \
     nuclei -update-templates -td /nuclei-templates || true && \
     ln -s /nuclei-templates /home/appuser/nuclei-templates && \
-    chown -R appuser:appgroup /home/appuser /nuclei-templates
+    chown -R appuser:appgroup /home/appuser /nuclei-templates && \
+    echo "appuser ALL=(ALL) NOPASSWD: /usr/bin/nmap" > /etc/sudoers.d/appuser && \
+    chmod 0440 /etc/sudoers.d/appuser && \
+    printf '#!/bin/sh\nexec sudo /usr/bin/nmap "$@"\n' > /usr/local/bin/nmap && \
+    chmod +x /usr/local/bin/nmap
 
 ENV NUCLEI_TEMPLATES_DIR=/nuclei-templates
 
