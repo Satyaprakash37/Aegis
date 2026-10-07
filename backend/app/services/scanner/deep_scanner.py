@@ -145,10 +145,10 @@ def _run_stage1_subdomains(domain: str) -> List[str]:
         logger.warning(f"[STAGE 1] subfinder binary not found at '{subfinder_bin}'. Skipping.")
         return list(discovered)
 
-    cmd = [subfinder_bin, "-d", clean_domain, "-silent", "-all", "-timeout", "120"]
+    cmd = [subfinder_bin, "-d", clean_domain, "-silent", "-all", "-timeout", "30"]
     logger.info(f"[STAGE 1] Invoking subfinder: {' '.join(cmd)}")
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         for line in proc.stdout.splitlines():
             sub = line.strip().lower()
             if sub and "." in sub:
@@ -203,11 +203,12 @@ def _run_stage2_live_probing(
             "-ip",
             "-follow-redirects",
             "-json",
-            "-timeout", "10",
-            "-threads", "25",
+            "-timeout", "8",
+            "-retries", "1",
+            "-threads", "30",
         ]
         logger.info(f"[STAGE 2] Invoking httpx: {' '.join(cmd)}")
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
         for line in proc.stdout.splitlines():
             line = line.strip()
@@ -281,7 +282,7 @@ def _run_stage3_port_scan_single_ip(
 
     try:
         # CDN IPs scanned light (top 100), real origin IPs scanned deep (top 500)
-        port_args = "-sV --top-ports 100 -T4" if is_cdn else "-sV --top-ports 500 -T4"
+        port_args = "-sV --top-ports 100 -T4 --host-timeout 3m" if is_cdn else "-sV --top-ports 500 -T4 --host-timeout 5m"
         logger.info(f"[STAGE 3] Port scanning {ip} (is_cdn={is_cdn}, args='{port_args}')")
         nm.scan(hosts=ip, arguments=port_args)
 
@@ -308,7 +309,7 @@ def _run_stage3_port_scan_single_ip(
         # Run NSE script vuln only on real backend servers with open ports
         if not is_cdn and open_ports:
             port_spec = ",".join(str(p["port"]) for p in open_ports[:15])
-            nse_args = f"-sV --script vuln -p {port_spec} -T4 --script-timeout 45s"
+            nse_args = f"-sV --script vuln -p {port_spec} -T4 --host-timeout 5m --script-timeout 30s"
             logger.info(f"[STAGE 3] Executing Nmap NSE scripts on {ip}:{port_spec}")
             nm.scan(hosts=ip, arguments=nse_args)
 
@@ -457,13 +458,15 @@ def _run_stage4_nuclei_target(
         "-silent",
         "-jsonl",
         "-timeout", "10",
-        "-max-host-error", "20",
+        "-rl", "50",
+        "-concurrency", "25",
+        "-max-host-error", "10",
     ]
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
-            stdout_data, _ = proc.communicate(timeout=75)
+            stdout_data, _ = proc.communicate(timeout=300)
         except subprocess.TimeoutExpired:
             proc.kill()
             stdout_data, _ = proc.communicate()
@@ -615,6 +618,7 @@ def _run_stage5_testssl_target(target: str) -> List[Dict[str, Any]]:
 
     cmd = [
         testssl_bin,
+        "--fast",
         "-p", "-s", "-U", "-h", "-c",
         "--ip", "one",
         "--jsonfile", out_file,
@@ -626,7 +630,7 @@ def _run_stage5_testssl_target(target: str) -> List[Dict[str, Any]]:
 
     logger.info(f"[STAGE 5] Invoking testssl.sh: {' '.join(cmd)}")
     try:
-        subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        subprocess.run(cmd, capture_output=True, text=True, timeout=90)
         if os.path.exists(out_file) and os.path.getsize(out_file) > 0:
             with open(out_file, "r") as f:
                 content = f.read().strip()
@@ -790,16 +794,33 @@ async def run_deep_scan(
         ]
 
     # -------------------------------------------------------------
-    # STAGE 4: Expanded Nuclei Active Web Exploitation
+    # STAGE 4: Expanded Nuclei Active Web Exploitation (Parallelized & Filtered)
     # -------------------------------------------------------------
-    # Build target URLs for Nuclei
-    nuclei_targets: List[str] = []
-    if live_hosts:
-        for h in live_hosts:
-            if h.get("url") and h["url"] not in nuclei_targets:
-                nuclei_targets.append(h["url"])
+    # Intelligent Target Reduction:
+    # 1. Skip dead weight: 404, 502, 503, 504 errors
+    # 2. Deduplicate: if multiple subdomains resolve to the same IP and have identical tech stacks, scan once
+    valid_candidates: List[Dict[str, Any]] = []
+    seen_ip_tech: Set[Tuple[str, str]] = set()
 
-    # Cap Nuclei targets to top 10 URLs to ensure scan completes within reasonable time
+    for h in live_hosts:
+        sc = h.get("status_code", 200)
+        if sc in (404, 502, 503, 504):
+            continue
+
+        ip_addr = h.get("ip") or ""
+        tech_key = ",".join(sorted(h.get("tech", [])))
+        dedup_key = (ip_addr, tech_key)
+        if ip_addr and dedup_key in seen_ip_tech:
+            logger.info(f"[STAGE 4] Skipping redundant target {h.get('url')} (shares IP {ip_addr} and tech with existing target)")
+            continue
+
+        if ip_addr:
+            seen_ip_tech.add(dedup_key)
+        valid_candidates.append(h)
+
+    nuclei_targets: List[str] = [h["url"] for h in valid_candidates if h.get("url")]
+
+    # Cap Nuclei targets to top 10 unique, active URLs
     nuclei_targets = nuclei_targets[:10]
     if not nuclei_targets:
         # Fallback to web ports discovered
@@ -808,21 +829,56 @@ async def run_deep_scan(
             scheme = "https" if port_num in (443, 8443) else "http"
             nuclei_targets.append(f"{scheme}://{p.get('ip', target)}:{port_num}")
 
-    await report_progress(4, "nuclei_web_scanning", f"Launching Nuclei dynamic testing on {len(nuclei_targets)} URLs...", hosts_processed=0, hosts_total=len(nuclei_targets))
+    await report_progress(
+        4,
+        "nuclei_web_scanning",
+        f"Launching parallel Nuclei scanning on {len(nuclei_targets)} target endpoints...",
+        hosts_processed=0,
+        hosts_total=len(nuclei_targets),
+    )
 
-    for idx, n_url in enumerate(nuclei_targets, start=1):
-        await report_progress(4, "nuclei_web_scanning", f"Nuclei: scanning {idx}/{len(nuclei_targets)} ({n_url})...", hosts_processed=idx, hosts_total=len(nuclei_targets))
-        nuclei_f = await asyncio.to_thread(_run_stage4_nuclei_target, n_url, all_open_ports)
-        all_findings.extend(nuclei_f)
+    # Parallelize Nuclei scanning across up to 4 concurrent processes
+    sem = asyncio.Semaphore(4)
+    completed_nuclei = 0
+
+    async def scan_single_target(n_url: str) -> List[Dict[str, Any]]:
+        nonlocal completed_nuclei
+        async with sem:
+            logger.info(f"[STAGE 4] Starting parallel Nuclei worker on {n_url}")
+            results = await asyncio.to_thread(_run_stage4_nuclei_target, n_url, all_open_ports)
+            completed_nuclei += 1
+            await report_progress(
+                4,
+                "nuclei_web_scanning",
+                f"Nuclei: completed {completed_nuclei}/{len(nuclei_targets)} targets ({n_url})",
+                hosts_processed=completed_nuclei,
+                hosts_total=len(nuclei_targets),
+            )
+            return results
+
+    if nuclei_targets:
+        nuclei_batches = await asyncio.gather(*[scan_single_target(u) for u in nuclei_targets], return_exceptions=True)
+        for res in nuclei_batches:
+            if isinstance(res, list):
+                all_findings.extend(res)
+            elif isinstance(res, Exception):
+                logger.error(f"[STAGE 4] Nuclei worker error: {res}")
 
     # -------------------------------------------------------------
-    # STAGE 5: SSL/TLS Cryptographic Audit (testssl.sh)
+    # STAGE 5: SSL/TLS Cryptographic Audit (testssl.sh) - Unique IP Deduplicated
     # -------------------------------------------------------------
-    # Find HTTPS hosts for testssl
+    # Find HTTPS hosts for testssl - only 1 audit per unique IP (same server = same cert)
     ssl_candidates: List[str] = []
+    seen_ssl_ips: Set[str] = set()
+
     for h in live_hosts:
         u = h.get("url", "")
         if u.startswith("https://"):
+            ip_val = h.get("ip") or ""
+            if ip_val and ip_val in seen_ssl_ips:
+                continue
+            if ip_val:
+                seen_ssl_ips.add(ip_val)
             host_only = u.replace("https://", "").split("/")[0]
             if host_only not in ssl_candidates:
                 ssl_candidates.append(host_only)

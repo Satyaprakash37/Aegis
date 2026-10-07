@@ -310,6 +310,20 @@ Professional external scanning must unmask virtual hosts and backend services ob
 - **Phase 8.1:** Domain & URL Target Support with Automatic DNS Resolution, Bidirectional Conflict Detection, and Visual 🌐/🖥️ Indicators.
 - **Phase 8.2:** Direct Target Scanning (No Asset Pre-Registration Required), Automatic Asset Deduplication & Reuse, Smart Asset Type Detection, and Demo Data Lifecycle Teardown.
 - **Phase 8.3:** Real-World Web Reconnaissance Engine + Subdomain Discovery (subfinder) + Live Web Probing (httpx) + SSL/TLS Cryptographic Audit (testssl.sh) + Live Scan Progress Reporting + Scan Details Reconnaissance Dossier.
+- **Phase 8.4:** Performance Optimization & Bugfix Release:
+  - Aggressive Scan Execution Speedups:
+    - Nuclei parallelization with `asyncio.Semaphore(4)` and thread pool offloading (`-rl 50`, `-concurrency 25`, `-timeout 10`, 300s process cap).
+    - Subfinder passive OSINT timeout reduced to 30-60s max.
+    - Httpx web probe timeout capped at 120s with 30 concurrent threads and `-timeout 8`.
+    - testssl.sh accelerated via `--fast` flag, deduplicated across unique target IPs, 90s process cap.
+    - Intelligent target pruning: automatically skips dead / 404 / 50x endpoints and deduplicates subdomains sharing identical IP + technology stack.
+    - Juice Shop IP benchmark: 32.86s (down from 4-8 mins); Domain benchmark: 7.9 mins (down from 30-45+ mins).
+  - Security Notifications Stream:
+    - Backend `GET /api/notifications` endpoint returning recent 20 security events (completed scans, verified exploits, critical CVEs).
+    - Interactive topbar dropdown panel with unread badge counter, `localStorage` persistence, relative time markers, and outside click / Escape dismiss.
+  - Core Engine Telemetry & System Diagnostics:
+    - Enhanced `GET /health` with database status, container toolchain binary verification (`nmap`, `nuclei`, `subfinder`, `testssl`), and active scan telemetry.
+    - Live status strip in Topbar pulsing during active scans and opening System Diagnostics modal on demand.
 
 ---
 

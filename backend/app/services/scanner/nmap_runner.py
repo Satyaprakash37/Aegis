@@ -32,9 +32,9 @@ def _execute_nmap_sync(ip_address: str, scan_type: str) -> List[Dict[str, Any]]:
     # -sV probes open ports to determine service and version info
     scan_type_str = str(scan_type).lower()
     if "quick" in scan_type_str:
-        args = "-sV --top-ports 100 -T4"
+        args = "-sV --top-ports 100 -T4 --host-timeout 3m"
     else:
-        args = "-sV -p 1-1000 -T4"
+        args = "-sV -p 1-1000 -T4 --host-timeout 5m"
 
     try:
         logger.info(f"Starting Nmap scan on {ip_address} with arguments: '{args}'")
