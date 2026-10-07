@@ -111,6 +111,29 @@ export default function Scans() {
     }
   };
 
+  // Ref to track open scan ID without causing fetchScans dependency loops
+  const selectedScanIdRef = useRef(null);
+  useEffect(() => {
+    selectedScanIdRef.current = selectedScan?.id || null;
+  }, [selectedScan]);
+
+  const handleCloseModal = () => {
+    selectedScanIdRef.current = null;
+    setSelectedScan(null);
+    setScanDetails(null);
+  };
+
+  // Close Dossier on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        handleCloseModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Fetch scans list
   const fetchScans = useCallback(async (isPolling = false) => {
     if (!isPolling) setLoading(true);
@@ -122,8 +145,8 @@ export default function Scans() {
       setTotal(res.data.total || 0);
 
       // If a scan detail is open, keep it in sync
-      if (selectedScan) {
-        const updated = (res.data.data || []).find(s => s.id === selectedScan.id);
+      if (selectedScanIdRef.current) {
+        const updated = (res.data.data || []).find(s => s.id === selectedScanIdRef.current);
         if (updated) {
           setSelectedScan(updated);
         }
@@ -135,7 +158,7 @@ export default function Scans() {
     } finally {
       if (!isPolling) setLoading(false);
     }
-  }, [page, pageSize, selectedScan]);
+  }, [page, pageSize]);
 
   // Initial load
   useEffect(() => {
@@ -731,15 +754,29 @@ export default function Scans() {
                       {/* Actions */}
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenScanDetails(scan);
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-mono transition-colors"
-                          >
-                            <span>Summary</span>
-                          </button>
+                          {scan.status === 'failed' ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenScanDetails(scan);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-white border border-rose-800/50 text-xs font-mono transition-colors cursor-pointer"
+                              title="Click to view failure reason and diagnostics"
+                            >
+                              <AlertTriangle className="w-3 h-3 text-rose-400" />
+                              <span>Failure Reason</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenScanDetails(scan);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-mono transition-colors cursor-pointer"
+                            >
+                              <span>Summary</span>
+                            </button>
+                          )}
                           {scan.total_vulns_found > 0 && (
                             <button
                               onClick={(e) => {
@@ -800,8 +837,14 @@ export default function Scans() {
 
       {/* SCAN DETAILS & RECONNAISSANCE SUMMARY MODAL */}
       {selectedScan && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative w-full max-w-4xl max-h-[90vh] bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div 
+          onClick={handleCloseModal}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-4xl max-h-[90vh] bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          >
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
               <div className="flex items-center gap-3">
@@ -824,10 +867,9 @@ export default function Scans() {
               </div>
 
               <button
-                onClick={() => {
-                  setSelectedScan(null);
-                  setScanDetails(null);
-                }}
+                data-testid="close-dossier-btn"
+                aria-label="Close Dossier Modal"
+                onClick={handleCloseModal}
                 className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -843,6 +885,68 @@ export default function Scans() {
                 </div>
               ) : (
                 <>
+                  {/* Scan Failure Reason Banner (Issue 1B Transparency) */}
+                  {(selectedScan.status === 'failed' || scanDetails?.raw_output?.error) && (
+                    <div className="p-5 rounded-xl bg-rose-950/25 border border-rose-800/60 space-y-3.5 shadow-lg">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 text-rose-400">
+                          <AlertTriangle className="w-5 h-5 shrink-0 text-rose-400" />
+                          <h4 className="text-sm font-mono font-bold uppercase tracking-wider text-rose-300">
+                            Scan Execution Failure
+                          </h4>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-900/50 text-rose-200 border border-rose-700/60 font-semibold uppercase">
+                          Aborted at: {scanDetails?.raw_output?.failure_stage || selectedScan.progress?.current_stage || 'Engine Pipeline'}
+                        </span>
+                      </div>
+
+                      {/* Primary Error Message */}
+                      <div className="p-3.5 rounded-lg bg-black/60 border border-rose-900/60 font-mono text-xs text-rose-200 space-y-1">
+                        <span className="text-[10px] text-slate-500 uppercase font-semibold block">Error Message:</span>
+                        <p className="font-semibold text-rose-300 text-[13px]">
+                          {scanDetails?.raw_output?.error || selectedScan.progress?.detail || 'Scan aborted due to target reachability or execution error.'}
+                        </p>
+                        {scanDetails?.raw_output?.error_type && (
+                          <span className="text-[10px] text-slate-400 block pt-0.5">
+                            Exception: <code className="text-rose-400">{scanDetails.raw_output.error_type}</code>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Actionable Hint Callout */}
+                      <div className="p-3 rounded-lg bg-amber-950/25 border border-amber-800/40 font-mono text-xs text-amber-200 flex items-start gap-2.5">
+                        <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-amber-300 uppercase tracking-wider text-[11px] block mb-0.5">
+                            Actionable Recommendation
+                          </span>
+                          <p className="text-amber-200/90 leading-relaxed font-sans text-xs">
+                            {scanDetails?.raw_output?.error_hint ||
+                              (String(scanDetails?.raw_output?.error || selectedScan.progress?.detail || '').toLowerCase().includes('offline')
+                                ? 'Host unreachable — verify target is powered on, public DNS resolves, and external firewall/routing permits TCP/UDP connections.'
+                                : 'Inspect network routing, firewall ACLs, or system diagnostics to identify reachability constraints.')}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Technical Details Footer */}
+                      <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono text-slate-400 pt-1 border-t border-rose-900/30">
+                        <div>
+                          <span className="text-slate-500">Target IP: </span>
+                          <span className="text-slate-300 font-semibold">{scanDetails?.raw_output?.target_ip || selectedScan.resolved_ip || selectedScan.asset_ip || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Scan Profile: </span>
+                          <span className="text-slate-300 uppercase">{selectedScan.scan_type}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Duration before failure: </span>
+                          <span className="text-slate-300">{formatElapsed(selectedScan.started_at, selectedScan.completed_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* High Level Metrics Cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
@@ -1080,10 +1184,8 @@ export default function Scans() {
             {/* Modal Footer */}
             <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex items-center justify-between">
               <button
-                onClick={() => {
-                  setSelectedScan(null);
-                  setScanDetails(null);
-                }}
+                data-testid="close-dossier-footer-btn"
+                onClick={handleCloseModal}
                 className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-mono border border-slate-800 transition-colors cursor-pointer"
               >
                 Close Dossier

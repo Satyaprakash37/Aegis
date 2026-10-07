@@ -70,7 +70,11 @@ async def get_dashboard_summary(
         await db.execute(
             select(func.count(Vulnerability.id)).where(
                 Vulnerability.danger_score > 6.0,
-                Vulnerability.verification.in_([VerificationType.nse_verified, VerificationType.nuclei_verified]),
+                Vulnerability.verification.in_([
+                    VerificationType.nse_verified,
+                    VerificationType.nuclei_verified,
+                    VerificationType.ssl_verified,
+                ]),
                 Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
             )
         )

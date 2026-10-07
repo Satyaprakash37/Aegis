@@ -85,6 +85,19 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                 await db.commit()
 
             is_deep = scan.scan_type == ScanType.deep or scan.scan_type.value == "deep"
+            stage_names = (
+                [
+                    "Stage 1: Subdomain Discovery",
+                    "Stage 2: Live Web Probing & Tech Stack Detection",
+                    "Stage 3: Smart Port & NSE Vulnerability Scanning",
+                    "Stage 4: Expanded Nuclei Active Web Exploitation",
+                    "Stage 5: SSL/TLS Cryptographic Audit",
+                    "Stage 6: Technology Version Vulnerability Analysis",
+                    "Stage 7: Aggregation & Threat Prioritization",
+                ]
+                if is_deep
+                else [f"Nmap Port & Service Fingerprinting ({scan.scan_type.value})", "NVD Threat Intelligence Enrichment"]
+            )
             active_verified_findings: List[Dict[str, Any]] = []
             recon_data: Optional[Dict[str, Any]] = None
 
@@ -118,19 +131,6 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                 )
 
             # Record initial raw output
-            stage_names = (
-                [
-                    "Stage 1: Subdomain Discovery",
-                    "Stage 2: Live Web Probing & Tech Stack Detection",
-                    "Stage 3: Smart Port & NSE Vulnerability Scanning",
-                    "Stage 4: Expanded Nuclei Active Web Exploitation",
-                    "Stage 5: SSL/TLS Cryptographic Audit",
-                    "Stage 6: Technology Version Vulnerability Analysis",
-                    "Stage 7: Aggregation & Threat Prioritization",
-                ]
-                if is_deep
-                else [f"Nmap Port & Service Fingerprinting ({scan.scan_type.value})", "NVD Threat Intelligence Enrichment"]
-            )
 
             scan_raw = {
                 "target": asset.ip_address,
@@ -383,26 +383,63 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             logger.warning(f"Scan #{scan.id} execution failed: {see}")
             scan.status = ScanStatus.failed
             scan.completed_at = datetime.now(timezone.utc)
-            scan.raw_output = {"error": str(see)}
+            
+            err_msg = str(see)
+            err_lower = err_msg.lower()
+            if "offline" in err_lower or "unreachable" in err_lower:
+                hint = "Host unreachable — verify target is online, network route is available, and firewall allows incoming TCP/UDP traffic."
+            elif "dns" in err_lower or "resolve" in err_lower:
+                hint = "DNS resolution failed — verify the domain is registered and resolvable via public DNS servers (8.8.8.8, 1.1.1.1)."
+            elif "timeout" in err_lower:
+                hint = "Scan timed out before receiving responses — the target may be rate-limiting probes or dropping connections."
+            else:
+                hint = "Scanner tool error — inspect technical details and container execution logs."
+
+            current_stg = scan.progress.get("current_stage") if (scan.progress and isinstance(scan.progress, dict)) else "port_scanning"
+
+            scan.raw_output = {
+                "error": err_msg,
+                "error_type": "ScanExecutionError",
+                "error_hint": hint,
+                "target": asset.ip_address,
+                "target_ip": scan_target,
+                "failure_stage": current_stg,
+                "stages": stage_names,
+            }
             scan.progress = {
                 "current_stage": "failed",
                 "stage_number": 0,
                 "stages_total": 7 if is_deep else 2,
-                "detail": f"Scan failed: {str(see)}",
+                "detail": f"Scan failed: {err_msg}",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             await db.commit()
 
         except Exception as exc:
+            import traceback
+            tb = traceback.format_exc()
             logger.error(f"Unexpected pipeline exception on Scan #{scan.id}: {exc}", exc_info=True)
             scan.status = ScanStatus.failed
             scan.completed_at = datetime.now(timezone.utc)
-            scan.raw_output = {"error": f"Pipeline failure: {str(exc)}"}
+
+            err_msg = str(exc)
+            current_stg = scan.progress.get("current_stage") if (scan.progress and isinstance(scan.progress, dict)) else "pipeline_execution"
+
+            scan.raw_output = {
+                "error": f"Pipeline failure: {err_msg}",
+                "error_type": type(exc).__name__,
+                "error_hint": "An unexpected pipeline exception occurred during execution. Inspect the technical detail below or container logs.",
+                "traceback_summary": tb[-600:] if tb else None,
+                "target": asset.ip_address,
+                "target_ip": scan_target,
+                "failure_stage": current_stg,
+                "stages": stage_names,
+            }
             scan.progress = {
                 "current_stage": "failed",
                 "stage_number": 0,
                 "stages_total": 7 if is_deep else 2,
-                "detail": f"Pipeline error: {str(exc)}",
+                "detail": f"Pipeline error: {err_msg}",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             await db.commit()

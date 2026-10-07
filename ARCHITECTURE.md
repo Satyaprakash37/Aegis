@@ -325,6 +325,26 @@ Professional external scanning must unmask virtual hosts and backend services ob
     - Enhanced `GET /health` with database status, container toolchain binary verification (`nmap`, `nuclei`, `subfinder`, `testssl`), and active scan telemetry.
     - Live status strip in Topbar pulsing during active scans and opening System Diagnostics modal on demand.
 
+- **Phase 8.5:** Full QA & Stability Release: Autonomous Bug Hunting, Scan Failure Transparency & Engine Hardening:
+  - **Quick Scan Failure on External Domains (Root Cause & Fix)**:
+    - *Root Cause*: Backend container runs as unprivileged user `appuser`. Without root capabilities, Nmap default ping uses TCP SYN/ACK discovery packets to ports 80/443. External firewalled targets (e.g. `cutn.ac.in`) drop discovery probes, prompting Nmap to assume "Host seems down" and terminate in 2.17s without scanning ports.
+    - *Fix*: Standardized unprivileged TCP connect scanning (`-sT`) with ping suppression (`-Pn`), service version detection (`-sV`), and top 100 ports scan profile (`-sT -sV -Pn --top-ports 100 -T4 --host-timeout 3m`). Added exponential backoff retry logic (2 attempts) to handle transient network packet loss.
+    - *Verification*: Quick scan on `cutn.ac.in` completes reliably in ~26s, discovering open web ports (80/443 Apache) and generating 10 NVD vulnerability correlations.
+  - **Scan Failure Transparency & Diagnostic Dossier**:
+    - Backend persists comprehensive error telemetry in `scan.raw_output`: `error`, `error_type`, `error_hint`, `failure_stage`, `target`, `target_ip`, and sanitized tracebacks.
+    - Automatic actionable recommendation generation based on failure mode (unreachable host, DNS resolution error, network timeout).
+    - Frontend Scans page table: failed scan rows render a high-visibility red `Failure Reason` action button with `AlertTriangle` icon.
+    - Scan Execution Dossier modal displays an executive `Scan Execution Failure` alert banner detailing the exact abort stage, primary error message, exception type, actionable operator guidance, and timing metadata.
+  - **Dead IP / Unreachable Target Detection**:
+    - Scanner distinguishes active filtered targets from non-existent hosts (e.g., TEST-NET-2 IP `203.0.113.99`). If zero open ports and no protocols respond (`reason: no-response`), immediately raises `ScanExecutionError` with tailored guidance.
+  - **Scan Collision & Concurrency Protection**:
+    - `POST /api/scans` and `POST /api/scans/direct` validate active scans against target asset; returns HTTP 409 Conflict if a scan is already running/pending on that asset.
+  - **Frontend State Stability & Memory Leak Prevention**:
+    - Resolved React state dependency cycle in `Scans.jsx` where closing the Dossier triggered `fetchScans` recreation, resetting `selectedScan`. Decoupled using `useRef` for `selectedScanIdRef` and unified `handleCloseModal`.
+    - Added Escape key listeners, backdrop dismissal, and `data-testid` handles for modal controls.
+  - **Full Platform QA Suite**:
+    - Automated Playwright end-to-end audit covering Auth (`/login`), Assets (`/assets`), Scans (`/scans`), Vulnerabilities (`/vulns`), Reports (`/reports`), and 404 handler (`/404`) with 0 console errors detected.
+
 ---
 
 ## 9. Operating Rules

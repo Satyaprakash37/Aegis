@@ -92,7 +92,21 @@ async def create_direct_scan(
         await db.refresh(asset)
         auto_created = True
 
-    # 4. Initialize scan
+    # 4. Prevent duplicate concurrent scans on the same target asset
+    active_scan_query = await db.execute(
+        select(Scan).where(
+            Scan.asset_id == asset.id,
+            Scan.status.in_([ScanStatus.pending, ScanStatus.running]),
+        )
+    )
+    active_scan = active_scan_query.scalar_one_or_none()
+    if active_scan:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A scan (Scan #{active_scan.id}, {active_scan.scan_type.value}) is already active on '{asset.name}'. Please allow it to finish before starting a new scan.",
+        )
+
+    # 5. Initialize scan
     new_scan = Scan(
         asset_id=asset.id,
         scan_type=scan_in.scan_type,
@@ -105,7 +119,7 @@ async def create_direct_scan(
     await db.commit()
     await db.refresh(new_scan)
 
-    # 5. Launch scan pipeline in background
+    # 6. Launch scan pipeline in background
     background_tasks.add_task(execute_scan_pipeline, new_scan.id)
 
     return DirectScanResponse(
@@ -137,6 +151,20 @@ async def create_scan(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Asset with ID {scan_in.asset_id} not found",
+        )
+
+    # Prevent duplicate concurrent scans on the same target asset
+    active_scan_query = await db.execute(
+        select(Scan).where(
+            Scan.asset_id == asset.id,
+            Scan.status.in_([ScanStatus.pending, ScanStatus.running]),
+        )
+    )
+    active_scan = active_scan_query.scalar_one_or_none()
+    if active_scan:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A scan (Scan #{active_scan.id}, {active_scan.scan_type.value}) is already active on '{asset.name}'. Please allow it to finish before starting a new scan.",
         )
 
     # Initialize pending scan record
