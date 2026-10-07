@@ -261,6 +261,7 @@ export default function Vulnerabilities() {
           <option value="">All Verifications</option>
           <option value="nuclei_verified">Nuclei Verified (Active)</option>
           <option value="nse_verified">NSE Verified (Active)</option>
+          <option value="ssl_verified">SSL Audit (Active)</option>
           <option value="version_match">Version Match</option>
         </select>
 

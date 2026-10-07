@@ -65,31 +65,74 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             scan.started_at = datetime.now(timezone.utc)
             await db.commit()
 
+            async def update_progress(
+                current_stage: str,
+                stage_number: int,
+                stages_total: int,
+                detail: str,
+                hosts_processed: int = 0,
+                hosts_total: int = 0,
+            ):
+                scan.progress = {
+                    "current_stage": current_stage,
+                    "stage_number": stage_number,
+                    "stages_total": stages_total,
+                    "detail": detail,
+                    "hosts_processed": hosts_processed,
+                    "hosts_total": hosts_total,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                await db.commit()
+
             is_deep = scan.scan_type == ScanType.deep or scan.scan_type.value == "deep"
             active_verified_findings: List[Dict[str, Any]] = []
+            recon_data: Optional[Dict[str, Any]] = None
 
             if is_deep:
-                # Execute three-stage deep scan against resolved IP
-                ports, active_verified_findings = await run_deep_scan(scan_target)
+                # Execute 7-stage reconnaissance and active verification engine
+                ports, active_verified_findings, recon_data = await run_deep_scan(
+                    target=scan_target,
+                    target_type=asset.target_type.value if hasattr(asset.target_type, "value") else str(asset.target_type),
+                    target_hostname=asset.hostname or (asset.ip_address if asset.target_type == TargetType.domain else None),
+                    resolved_ip=asset.resolved_ip,
+                    progress_callback=update_progress,
+                )
             else:
+                stages_total = 2
+                await update_progress(
+                    current_stage="port_scanning",
+                    stage_number=1,
+                    stages_total=stages_total,
+                    detail=f"Scanning ports ({scan.scan_type.value})...",
+                )
                 # Execute standard Nmap port scan (quick or full) against resolved IP
                 ports = await run_nmap_scan(
                     ip_address=scan_target,
                     scan_type=scan.scan_type.value,
                 )
+                await update_progress(
+                    current_stage="nvd_enrichment",
+                    stage_number=2,
+                    stages_total=stages_total,
+                    detail="Correlating NVD CVE threat intelligence...",
+                )
 
             # Record initial raw output
             stage_names = (
                 [
-                    "Stage 1: Nmap Service Discovery (top 500 ports)",
-                    "Stage 2: Nmap NSE Script Active Scanning",
-                    "Stage 3: Nuclei Dynamic Active Verification",
+                    "Stage 1: Subdomain Discovery",
+                    "Stage 2: Live Web Probing & Tech Stack Detection",
+                    "Stage 3: Smart Port & NSE Vulnerability Scanning",
+                    "Stage 4: Expanded Nuclei Active Web Exploitation",
+                    "Stage 5: SSL/TLS Cryptographic Audit",
+                    "Stage 6: Technology Version Vulnerability Analysis",
+                    "Stage 7: Aggregation & Threat Prioritization",
                 ]
                 if is_deep
-                else [f"Nmap Port & Service Fingerprinting ({scan.scan_type.value})"]
+                else [f"Nmap Port & Service Fingerprinting ({scan.scan_type.value})", "NVD Threat Intelligence Enrichment"]
             )
 
-            scan.raw_output = {
+            scan_raw = {
                 "target": asset.ip_address,
                 "target_type": asset.target_type.value if hasattr(asset.target_type, "value") else str(asset.target_type),
                 "target_ip": scan_target,
@@ -101,6 +144,9 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                 "stages": stage_names,
                 "active_verified_count": len(active_verified_findings),
             }
+            if recon_data:
+                scan_raw["recon"] = recon_data
+            scan.raw_output = scan_raw
             await db.commit()
 
             total_vulns = 0
@@ -108,6 +154,7 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                 "version_match": 0,
                 "nse_verified": 0,
                 "nuclei_verified": 0,
+                "ssl_verified": 0,
             }
 
             now_utc = datetime.now(timezone.utc)
@@ -170,7 +217,7 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                         risk_score=risk_score,
                         epss_score=None,
                         status=VulnerabilityStatus.open,
-                        remediation="Apply official security patch or mitigation playbook immediately.",
+                        remediation=v_finding.get("remediation") or "Apply official security patch or mitigation playbook immediately.",
                         verification=VerificationType(v_type),
                         evidence=evidence,
                         danger_score=danger_meta["danger_score"],
@@ -308,13 +355,23 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                     asset.asset_type = AssetType.db
                     logger.info(f"Smart Detection: Auto-created asset #{asset.id} ('{asset.name}') updated to type 'db'")
 
-            # Update final scan record with breakdown
+            # Update final scan record with breakdown and recon data
             raw_out = scan.raw_output or {}
             raw_out["verification_breakdown"] = verification_counts
+            if recon_data:
+                raw_out["recon"] = recon_data
             scan.raw_output = raw_out
             scan.status = ScanStatus.completed
             scan.completed_at = datetime.now(timezone.utc)
             scan.total_vulns_found = total_vulns
+
+            final_stages = 7 if is_deep else 2
+            await update_progress(
+                current_stage="completed",
+                stage_number=final_stages,
+                stages_total=final_stages,
+                detail=f"Scan completed: {total_vulns} finding(s) identified",
+            )
             await db.commit()
 
             logger.info(
@@ -327,6 +384,13 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             scan.status = ScanStatus.failed
             scan.completed_at = datetime.now(timezone.utc)
             scan.raw_output = {"error": str(see)}
+            scan.progress = {
+                "current_stage": "failed",
+                "stage_number": 0,
+                "stages_total": 7 if is_deep else 2,
+                "detail": f"Scan failed: {str(see)}",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
             await db.commit()
 
         except Exception as exc:
@@ -334,4 +398,11 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             scan.status = ScanStatus.failed
             scan.completed_at = datetime.now(timezone.utc)
             scan.raw_output = {"error": f"Pipeline failure: {str(exc)}"}
+            scan.progress = {
+                "current_stage": "failed",
+                "stage_number": 0,
+                "stages_total": 7 if is_deep else 2,
+                "detail": f"Pipeline error: {str(exc)}",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
             await db.commit()

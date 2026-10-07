@@ -214,6 +214,7 @@ async def list_scans(
                 completed_at=s.completed_at,
                 total_vulns_found=s.total_vulns_found,
                 raw_output=s.raw_output,
+                progress=s.progress,
             )
         )
 
@@ -271,6 +272,7 @@ async def get_scan(
         "version_match": raw_v_counts.get(VerificationType.version_match, 0),
         "nse_verified": raw_v_counts.get(VerificationType.nse_verified, 0),
         "nuclei_verified": raw_v_counts.get(VerificationType.nuclei_verified, 0),
+        "ssl_verified": raw_v_counts.get(VerificationType.ssl_verified, 0),
     }
 
     return ScanDetailRead(
@@ -286,6 +288,7 @@ async def get_scan(
         completed_at=scan.completed_at,
         total_vulns_found=scan.total_vulns_found,
         raw_output=scan.raw_output,
+        progress=scan.progress,
         vuln_counts=vuln_counts,
         verification_breakdown=verification_breakdown,
     )

@@ -10,12 +10,15 @@
 
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT" /></a>
-  <a href="#architecture"><img src="https://img.shields.io/badge/version-v1.1.0-emerald.svg?style=flat-square" alt="Version 1.1.0" /></a>
+  <a href="#architecture"><img src="https://img.shields.io/badge/version-v1.2.0-emerald.svg?style=flat-square" alt="Version 1.2.0" /></a>
   <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.110+-009688.svg?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" /></a>
   <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18.3+-61DAFB.svg?style=flat-square&logo=react&logoColor=black" alt="React" /></a>
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1.svg?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL" /></a>
   <a href="https://nmap.org/"><img src="https://img.shields.io/badge/Nmap-7.93+-blue.svg?style=flat-square&logo=linux&logoColor=white" alt="Nmap" /></a>
   <a href="https://github.com/projectdiscovery/nuclei"><img src="https://img.shields.io/badge/Nuclei-v3.3.8-yellow.svg?style=flat-square&logo=target&logoColor=black" alt="Nuclei v3" /></a>
+  <a href="https://github.com/projectdiscovery/subfinder"><img src="https://img.shields.io/badge/Subfinder-v2.16-orange.svg?style=flat-square" alt="Subfinder v2" /></a>
+  <a href="https://github.com/projectdiscovery/httpx"><img src="https://img.shields.io/badge/httpx-v1.12-cyan.svg?style=flat-square" alt="httpx v1" /></a>
+  <a href="https://testssl.sh/"><img src="https://img.shields.io/badge/testssl.sh-v3.3dev-purple.svg?style=flat-square" alt="testssl.sh" /></a>
   <a href="https://docker.com/"><img src="https://img.shields.io/badge/Docker-Multi--Container-2496ED.svg?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/TailwindCSS-3.4+-38B2AC.svg?style=flat-square&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" /></a>
 </p>
@@ -66,6 +69,16 @@ Dark SOC theme with JWT role-based access control, account lockout protection, a
 
 ## Core Capabilities
 
+- **Real-World Web Reconnaissance Engine & Live Progress Reporting (Phase 8.3):**
+  - **Stage 1 (Subdomain Discovery):** Automated passive OSINT subdomain enumeration using ProjectDiscovery `subfinder v2.16` (up to 100 subdomains).
+  - **Stage 2 (Live Web Probing & Tech Detection):** High-speed multi-threaded probing with ProjectDiscovery `httpx v1.12` extracting status codes, page titles, CDN edge detection, and software stacks.
+  - **Stage 3 (CDN-Aware Smart Port & NSE Scanning):** CDN IPs scanned light (top 100 ports); true origin IPs scanned deep (top 500 ports + Nmap NSE `vuln` scripts).
+  - **Stage 4 (Expanded Nuclei Dynamic Web Exploitation):** Probes live discovered virtual hosts with Nuclei v3 for active CVEs, exposures, and misconfigurations.
+  - **Stage 5 (SSL/TLS Cryptographic Audit):** Evaluates cipher strength, deprecated protocols (TLS 1.0/1.1), missing HSTS headers, Heartbleed, ROBOT, and cert validity via `testssl.sh`, tagging findings with purple `SSL Audit ✓` badges.
+  - **Stage 6 (Software Stack Version Advisories):** Cross-references discovered web runtime versions (WordPress, Apache, PHP, nginx, Gunicorn) against known advisories.
+  - **Stage 7 (Dossier Aggregation & Prioritization):** Stores full reconnaissance profile in `raw_output.recon` and deduplicates findings.
+  - **Live Progress Telemetry:** Background scans continuously report `current_stage`, `stage_number`, `stages_total`, `detail`, and host counters in `scans.progress`, rendered in the UI with animated percentage bars and elapsed timers.
+  - **Reconnaissance Summary Dossier:** Interactive modal displays discovered subdomain tags, live endpoint status, detected technology pill badges, and CDN bypass indicators.
 - **Deep Active Vulnerability Verification (Phase 8):**
   - **Stage 1 (Port & Service Sweep):** Fast discovery across top 500 ports using `-T4 -sV`.
   - **Stage 2 (Nmap NSE Active Audits):** Targets discovered services with the Nmap Scripting Engine (`--script vuln`) to actively verify exploits like MS17-010, BlueKeep, and Heartbleed, capturing raw output proof.

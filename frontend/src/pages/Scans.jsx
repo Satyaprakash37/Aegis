@@ -17,10 +17,15 @@ import {
   Check,
   ChevronDown,
   Crosshair,
-  Globe
+  Globe,
+  Layers,
+  ShieldCheck,
+  AlertTriangle,
+  Lock,
+  X
 } from 'lucide-react';
 import api from '../api/client';
-import { ScanStatusBadge } from '../components/Badge';
+import { ScanStatusBadge, SeverityBadge, VerificationBadge } from '../components/Badge';
 import Toast from '../components/Toast';
 
 export default function Scans() {
@@ -39,6 +44,11 @@ export default function Scans() {
   const [selectedAssetId, setSelectedAssetId] = useState('');
   const [scanType, setScanType] = useState('quick');
 
+  // Scan Details Drawer State
+  const [selectedScan, setSelectedScan] = useState(null);
+  const [scanDetails, setScanDetails] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+
   // Pagination
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -46,6 +56,15 @@ export default function Scans() {
 
   // Track if polling is active
   const pollIntervalRef = useRef(null);
+
+  // Live elapsed timer state (ticks every second when there are active scans)
+  const [nowTimestamp, setNowTimestamp] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTimestamp(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -101,6 +120,14 @@ export default function Scans() {
       });
       setScans(res.data.data || []);
       setTotal(res.data.total || 0);
+
+      // If a scan detail is open, keep it in sync
+      if (selectedScan) {
+        const updated = (res.data.data || []).find(s => s.id === selectedScan.id);
+        if (updated) {
+          setSelectedScan(updated);
+        }
+      }
     } catch (err) {
       if (!isPolling) {
         showToast(err.response?.data?.detail || 'Failed to fetch scan telemetry', 'error');
@@ -108,7 +135,7 @@ export default function Scans() {
     } finally {
       if (!isPolling) setLoading(false);
     }
-  }, [page, pageSize]);
+  }, [page, pageSize, selectedScan]);
 
   // Initial load
   useEffect(() => {
@@ -119,7 +146,7 @@ export default function Scans() {
     fetchScans();
   }, [fetchScans]);
 
-  // Live polling for running/pending scans every 5 seconds
+  // Live polling for running/pending scans every 3 seconds
   useEffect(() => {
     const hasActiveScans = scans.some(
       (s) => s.status === 'running' || s.status === 'pending'
@@ -129,7 +156,7 @@ export default function Scans() {
       if (!pollIntervalRef.current) {
         pollIntervalRef.current = setInterval(() => {
           fetchScans(true);
-        }, 5000);
+        }, 3000);
       }
     } else {
       if (pollIntervalRef.current) {
@@ -145,6 +172,21 @@ export default function Scans() {
       }
     };
   }, [scans, fetchScans]);
+
+  // Open Scan Details
+  const handleOpenScanDetails = async (scan) => {
+    setSelectedScan(scan);
+    setDetailsLoading(true);
+    try {
+      const res = await api.get(`/api/scans/${scan.id}`);
+      setScanDetails(res.data);
+    } catch (err) {
+      console.error('Failed to load scan details:', err);
+      setScanDetails(scan);
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
 
   // Handle Scan Initiation (Direct scan or saved asset scan)
   const handleStartScan = async (e) => {
@@ -198,6 +240,20 @@ export default function Scans() {
     }
   };
 
+  const formatElapsed = (startedAt, completedAt = null) => {
+    if (!startedAt) return '0s';
+    const start = new Date(startedAt).getTime();
+    const end = completedAt ? new Date(completedAt).getTime() : nowTimestamp;
+    const diffSec = Math.max(0, Math.floor((end - start) / 1000));
+    const mins = Math.floor(diffSec / 60);
+    const secs = diffSec % 60;
+    if (mins === 0) return `${secs}s`;
+    return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
+  };
+
+  // Find currently active running scan if any
+  const runningScans = scans.filter((s) => s.status === 'running' || s.status === 'pending');
+
   return (
     <div className="space-y-6">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
@@ -210,11 +266,11 @@ export default function Scans() {
               Network Vulnerability Scanner
             </h1>
             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-              Nmap Engine + NVD 2.0
+              Recon Engine + Nmap + Nuclei v3 + testssl.sh
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1 font-sans">
-            Launch background port fingerprinting and correlate live CVE intelligence
+            Real-world reconnaissance, subdomain discovery, active verification & cryptographic audit
           </p>
         </div>
 
@@ -227,6 +283,71 @@ export default function Scans() {
         </button>
       </div>
 
+      {/* LIVE PROGRESS BANNER (Visible during active execution) */}
+      {runningScans.length > 0 && (
+        <div className="p-4 rounded-xl border border-cyan-500/40 bg-gradient-to-r from-slate-950 via-cyan-950/20 to-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.15)] space-y-3">
+          {runningScans.map((rScan) => {
+            const prog = rScan.progress || {};
+            const stageNum = prog.stage_number || 1;
+            const totalStages = prog.stages_total || (rScan.scan_type === 'deep' ? 7 : 3);
+            const pct = Math.min(100, Math.max(5, Math.round((stageNum / totalStages) * 100)));
+            const stageLabel = prog.current_stage || (rScan.status === 'pending' ? 'Queued / Initializing' : 'Executing Scan Probes');
+            const detailText = prog.detail || 'Initializing engine processes...';
+            const elapsed = formatElapsed(rScan.started_at);
+
+            return (
+              <div key={rScan.id} className="space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <span className="relative flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                    </span>
+                    <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                      Live Scan #{rScan.id}: {rScan.asset_name}
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      {rScan.scan_type.toUpperCase()}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-xs font-mono text-slate-300">
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+                      <span>{elapsed} elapsed</span>
+                    </div>
+                    <span className="text-cyan-400 font-bold">
+                      Stage {stageNum} of {totalStages} ({pct}%)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+                  <div
+                    className="h-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-400 transition-all duration-500 rounded-full"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+
+                {/* Stage Detail narrative */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] font-mono text-slate-400">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <span className="font-semibold text-cyan-300">[{stageLabel}]</span>
+                    <span>{detailText}</span>
+                  </div>
+                  {prog.hosts_total > 0 && (
+                    <span className="text-slate-400">
+                      Hosts: {prog.hosts_processed || 0} / {prog.hosts_total}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Top Section: Scan Launcher */}
       <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md space-y-4">
         <div className="flex items-center justify-between">
@@ -237,7 +358,7 @@ export default function Scans() {
             </h2>
           </div>
           <span className="text-[11px] font-mono text-cyan-400 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/40">
-            Nmap Engine + Nuclei v3 Active Verification
+            Nmap Engine + Nuclei v3 + testssl.sh Recon
           </span>
         </div>
 
@@ -407,17 +528,17 @@ export default function Scans() {
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs font-mono font-bold uppercase text-emerald-400 flex items-center gap-1.5">
                       <Zap className="w-3.5 h-3.5 fill-emerald-400 text-emerald-400" />
-                      Deep Active Verification
+                      Deep Recon + Active Verification
                     </span>
-                    <span className="text-[10px] font-mono text-emerald-400/80 bg-emerald-950/60 border border-emerald-800/40 px-1.5 py-0.5 rounded">Multi-Stage</span>
+                    <span className="text-[10px] font-mono text-emerald-400/80 bg-emerald-950/60 border border-emerald-800/40 px-1.5 py-0.5 rounded">7-Stage Recon</span>
                   </div>
                   <p className="text-xs text-slate-300 font-sans leading-relaxed">
-                    Active verification with Nmap NSE vuln scripts and live Nuclei dynamic exploitation with proof of concept evidence.
+                    Full recon: subdomain discovery, live host probing, technology detection, 3000+ vulnerability checks, SSL/TLS audit (10-30 min)
                   </p>
                 </div>
                 <div className="mt-3 pt-2 border-t border-slate-800/60 text-[11px] font-mono text-emerald-300/80 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  <span>Nmap Top 500 + NSE + Nuclei v3</span>
+                  <span>Subfinder + httpx + Nuclei v3 + testssl.sh</span>
                 </div>
               </button>
             </div>
@@ -429,7 +550,7 @@ export default function Scans() {
               <Zap className="w-3.5 h-3.5 text-cyan-400" />
               <span>
                 {scanType === 'deep' 
-                  ? 'Deep scan actively probes for verified exploitability without guessing.' 
+                  ? 'Deep scan performs full reconnaissance, active exploit verification, and cryptographic SSL audit.' 
                   : scanType === 'full' 
                   ? 'Full scan covers 1,000 standard ports with NVD version matching.' 
                   : 'Quick scan offers fast discovery on top 100 ports.'}
@@ -453,7 +574,7 @@ export default function Scans() {
               ) : (
                 <>
                   <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>Start {scanType === 'deep' ? 'Deep Active' : scanType === 'full' ? 'Full' : 'Quick'} Scan</span>
+                  <span>Start {scanType === 'deep' ? 'Deep Recon' : scanType === 'full' ? 'Full' : 'Quick'} Scan</span>
                 </>
               )}
             </button>
@@ -481,11 +602,11 @@ export default function Scans() {
               <tr className="border-b border-slate-800/80 bg-slate-950 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
                 <th className="py-3 px-4">Target Asset</th>
                 <th className="py-3 px-4">Scan Type</th>
-                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4">Status & Progress</th>
                 <th className="py-3 px-4">Started</th>
-                <th className="py-3 px-4">Completed</th>
+                <th className="py-3 px-4">Duration</th>
                 <th className="py-3 px-4 text-center">Vulns Found</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-3 px-4 text-right">Details & Findings</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/40">
@@ -512,105 +633,130 @@ export default function Scans() {
                   </td>
                 </tr>
               ) : (
-                scans.map((scan) => (
-                  <tr
-                    key={scan.id}
-                    className="hover:bg-slate-900/40 transition-colors group cursor-pointer"
-                    onClick={() => {
-                      if (scan.total_vulns_found > 0) {
-                        navigate(`/vulns?scan_id=${scan.id}`);
-                      }
-                    }}
-                  >
-                    {/* Target Asset */}
-                    <td className="py-3.5 px-4">
-                      <div className="font-medium text-white font-mono flex items-center gap-2 flex-wrap">
-                        <span>{scan.asset_name}</span>
-                        {scan.asset_ip && (
-                          <span className="text-[11px] text-cyan-300 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/30 flex items-center gap-1">
-                            {scan.target_type === 'domain' ? <span>🌐</span> : <span>🖥️</span>}
-                            <span>{scan.asset_ip}</span>
+                scans.map((scan) => {
+                  const isRunning = scan.status === 'running';
+                  const prog = scan.progress || {};
+                  const stageNum = prog.stage_number || 1;
+                  const totalStages = prog.stages_total || (scan.scan_type === 'deep' ? 7 : 3);
+                  const pct = Math.min(100, Math.max(5, Math.round((stageNum / totalStages) * 100)));
+
+                  return (
+                    <tr
+                      key={scan.id}
+                      className="hover:bg-slate-900/40 transition-colors group cursor-pointer"
+                      onClick={() => handleOpenScanDetails(scan)}
+                    >
+                      {/* Target Asset */}
+                      <td className="py-3.5 px-4">
+                        <div className="font-medium text-white font-mono flex items-center gap-2 flex-wrap">
+                          <span>{scan.asset_name}</span>
+                          {scan.asset_ip && (
+                            <span className="text-[11px] text-cyan-300 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/30 flex items-center gap-1">
+                              {scan.target_type === 'domain' ? <span>🌐</span> : <span>🖥️</span>}
+                              <span>{scan.asset_ip}</span>
+                            </span>
+                          )}
+                          {scan.target_type === 'domain' && scan.resolved_ip && (
+                            <span className="text-[10px] font-mono text-slate-400">
+                              ↳ {scan.resolved_ip}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Scan Type */}
+                      <td className="py-3.5 px-4 font-mono text-xs">
+                        {scan.scan_type === 'deep' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]">
+                            <Zap className="w-3 h-3 fill-emerald-400 text-emerald-400" />
+                            <span>DEEP RECON</span>
+                          </span>
+                        ) : scan.scan_type === 'full' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                            FULL (1-1000)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                            QUICK
                           </span>
                         )}
-                        {scan.target_type === 'domain' && scan.resolved_ip && (
-                          <span className="text-[10px] font-mono text-slate-400">
-                            ↳ {scan.resolved_ip}
-                          </span>
+                      </td>
+
+                      {/* Status & Inline Progress */}
+                      <td className="py-3.5 px-4 min-w-[150px]">
+                        {isRunning ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[10px] font-mono">
+                              <span className="text-cyan-400 font-semibold flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                                {prog.current_stage ? `${prog.current_stage.slice(0, 18)}...` : 'Running...'}
+                              </span>
+                              <span className="text-slate-400">{pct}%</span>
+                            </div>
+                            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="h-full bg-cyan-400 transition-all duration-300 rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <ScanStatusBadge status={scan.status} />
                         )}
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Scan Type */}
-                    <td className="py-3.5 px-4 font-mono text-xs">
-                      {scan.scan_type === 'deep' ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]">
-                          <Zap className="w-3 h-3 fill-emerald-400 text-emerald-400" />
-                          <span>DEEP ACTIVE</span>
-                        </span>
-                      ) : scan.scan_type === 'full' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-blue-500/10 text-blue-300 border border-blue-500/20">
-                          FULL (1-1000)
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700">
-                          QUICK
-                        </span>
-                      )}
-                    </td>
+                      {/* Started */}
+                      <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px]">
+                        {formatDate(scan.started_at)}
+                      </td>
 
-                    {/* Status */}
-                    <td className="py-3.5 px-4">
-                      <ScanStatusBadge status={scan.status} />
-                    </td>
+                      {/* Duration */}
+                      <td className="py-3.5 px-4 font-mono text-slate-300 text-[11px]">
+                        {formatElapsed(scan.started_at, scan.completed_at)}
+                      </td>
 
-                    {/* Started */}
-                    <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px]">
-                      {formatDate(scan.started_at)}
-                    </td>
-
-                    {/* Completed */}
-                    <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px]">
-                      {formatDate(scan.completed_at)}
-                    </td>
-
-                    {/* Vulns Found */}
-                    <td className="py-3.5 px-4 text-center">
-                      <span
-                        className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-mono font-bold ${
-                          scan.total_vulns_found > 0
-                            ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                            : 'bg-slate-900 text-slate-500 border border-slate-800'
-                        }`}
-                      >
-                        {scan.total_vulns_found}
-                      </span>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="py-3.5 px-4 text-right">
-                      {scan.total_vulns_found > 0 ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/vulns?scan_id=${scan.id}`);
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 hover:border-cyan-500/40 text-xs font-mono transition-colors"
+                      {/* Vulns Found */}
+                      <td className="py-3.5 px-4 text-center">
+                        <span
+                          className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-mono font-bold ${
+                            scan.total_vulns_found > 0
+                              ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                              : 'bg-slate-900 text-slate-500 border border-slate-800'
+                          }`}
                         >
-                          <span>Findings</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </button>
-                      ) : scan.status === 'completed' ? (
-                        <span className="text-slate-500 text-[11px] font-mono">0 Findings</span>
-                      ) : scan.status === 'failed' ? (
-                        <span className="text-rose-400/80 text-[11px] font-mono flex items-center justify-end gap-1">
-                          <AlertCircle className="w-3 h-3" /> Error
+                          {scan.total_vulns_found}
                         </span>
-                      ) : (
-                        <span className="text-cyan-400/80 text-[11px] font-mono animate-pulse">Running</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenScanDetails(scan);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-mono transition-colors"
+                          >
+                            <span>Summary</span>
+                          </button>
+                          {scan.total_vulns_found > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/vulns?scan_id=${scan.id}`);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-400 border border-cyan-800/40 text-xs font-mono transition-colors"
+                            >
+                              <span>Findings</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -651,6 +797,316 @@ export default function Scans() {
           </div>
         </div>
       </div>
+
+      {/* SCAN DETAILS & RECONNAISSANCE SUMMARY MODAL */}
+      {selectedScan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative w-full max-w-4xl max-h-[90vh] bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-950/60 border border-cyan-800/50 flex items-center justify-center text-cyan-400">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-white font-mono">
+                      Scan Execution Dossier #{selectedScan.id}
+                    </h3>
+                    <ScanStatusBadge status={selectedScan.status} />
+                  </div>
+                  <p className="text-xs font-mono text-slate-400 mt-0.5">
+                    Target: <span className="text-white font-semibold">{selectedScan.asset_name}</span>
+                    {selectedScan.asset_ip ? ` (${selectedScan.asset_ip})` : ''}
+                    {selectedScan.resolved_ip ? ` ↳ ${selectedScan.resolved_ip}` : ''}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setSelectedScan(null);
+                  setScanDetails(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Body */}
+            <div className="p-6 space-y-6 overflow-y-auto">
+              {detailsLoading ? (
+                <div className="py-16 text-center text-slate-500 space-y-2">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-cyan-400" />
+                  <p className="text-xs font-mono">Loading telemetry and reconnaissance data...</p>
+                </div>
+              ) : (
+                <>
+                  {/* High Level Metrics Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1">
+                        Total Findings
+                      </span>
+                      <div className="text-xl font-bold font-mono text-white flex items-center gap-2">
+                        <span>{selectedScan.total_vulns_found}</span>
+                        {selectedScan.total_vulns_found > 0 && (
+                          <span className="text-xs text-rose-400 font-normal">vulnerabilities</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1">
+                        Scan Profile
+                      </span>
+                      <div className="text-sm font-bold font-mono text-cyan-400 uppercase">
+                        {selectedScan.scan_type}
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1">
+                        Duration
+                      </span>
+                      <div className="text-sm font-bold font-mono text-slate-200">
+                        {formatElapsed(selectedScan.started_at, selectedScan.completed_at)}
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1">
+                        Completed At
+                      </span>
+                      <div className="text-xs font-mono text-slate-300">
+                        {selectedScan.completed_at ? formatDate(selectedScan.completed_at) : 'In Progress...'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Verification Breakdown Section */}
+                  {scanDetails?.verification_breakdown && (
+                    <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          Verification Type Breakdown
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          Proof of Concept & Evidence Engine
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="p-2.5 rounded-lg bg-blue-950/20 border border-blue-800/30 flex items-center justify-between">
+                          <span className="text-xs font-mono text-blue-300 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-blue-400" />
+                            Nuclei
+                          </span>
+                          <span className="text-xs font-bold font-mono text-white">
+                            {scanDetails.verification_breakdown.nuclei_verified || 0}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 rounded-lg bg-emerald-950/20 border border-emerald-800/30 flex items-center justify-between">
+                          <span className="text-xs font-mono text-emerald-300 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                            NSE Script
+                          </span>
+                          <span className="text-xs font-bold font-mono text-white">
+                            {scanDetails.verification_breakdown.nse_verified || 0}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 rounded-lg bg-purple-950/20 border border-purple-800/30 flex items-center justify-between">
+                          <span className="text-xs font-mono text-purple-300 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-purple-400" />
+                            SSL Audit
+                          </span>
+                          <span className="text-xs font-bold font-mono text-white">
+                            {scanDetails.verification_breakdown.ssl_verified || 0}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between">
+                          <span className="text-xs font-mono text-slate-400 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-slate-500" />
+                            Version Match
+                          </span>
+                          <span className="text-xs font-bold font-mono text-white">
+                            {scanDetails.verification_breakdown.version_match || 0}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* RECONNAISSANCE SUMMARY SECTION */}
+                  {scanDetails?.raw_output?.recon ? (
+                    <div className="p-5 rounded-xl bg-slate-900/60 border border-cyan-800/40 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Globe className="w-4 h-4 text-cyan-400" />
+                          <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                            Reconnaissance Summary
+                          </h4>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-cyan-950/60 text-cyan-300 border border-cyan-800/40">
+                            {scanDetails.raw_output.recon.subdomains_found || 0} Subdomains Discovered
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">
+                            {scanDetails.raw_output.recon.live_hosts_found || 0} Live Targets Probed
+                          </span>
+                          {scanDetails.raw_output.recon.cdn_detected ? (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950/60 text-amber-300 border border-amber-800/40 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-amber-400" />
+                              <span>CDN: {scanDetails.raw_output.recon.cdn_name || 'Protected'}</span>
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
+                              Origin Direct (No CDN)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* CDN Warning banner if detected */}
+                      {scanDetails.raw_output.recon.cdn_detected && (
+                        <div className="p-3 rounded-lg bg-amber-950/20 border border-amber-800/40 text-xs font-sans text-amber-200 flex items-start gap-2.5">
+                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold font-mono text-amber-300">CDN Edge Detected: </span>
+                            Target apex resolves to an edge proxy network ({scanDetails.raw_output.recon.cdn_name || 'Cloudflare/CloudFront'}). Recon engine mapped subdomains and probed virtual hosts directly to bypass CDN obfuscation.
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Live Hosts Table */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs font-mono text-slate-400">
+                          <span className="uppercase tracking-wider font-semibold">Probed Web Endpoints & Tech Stacks</span>
+                          <span>{scanDetails.raw_output.recon.live_hosts?.length || 0} Active Services</span>
+                        </div>
+
+                        {scanDetails.raw_output.recon.live_hosts?.length > 0 ? (
+                          <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-950">
+                            <table className="w-full text-left text-xs font-mono">
+                              <thead>
+                                <tr className="border-b border-slate-800 bg-slate-900/60 text-slate-400 text-[11px]">
+                                  <th className="py-2.5 px-3">Target Endpoint</th>
+                                  <th className="py-2.5 px-3">Page Title</th>
+                                  <th className="py-2.5 px-3">Detected Technologies</th>
+                                  <th className="py-2.5 px-3">Resolved IP</th>
+                                  <th className="py-2.5 px-3 text-right">CDN Edge</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/50">
+                                {scanDetails.raw_output.recon.live_hosts.map((host, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-900/30">
+                                    <td className="py-2.5 px-3 font-semibold text-cyan-300 truncate max-w-[200px]" title={host.url}>
+                                      {host.url}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-300 truncate max-w-[180px]" title={host.title || 'N/A'}>
+                                      {host.title || '—'}
+                                    </td>
+                                    <td className="py-2.5 px-3">
+                                      {host.tech && host.tech.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1">
+                                          {host.tech.map((t, ti) => (
+                                            <span key={ti} className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">
+                                              {t}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-500">—</span>
+                                      )}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-400">
+                                      {host.ip || '—'}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right">
+                                      {host.cdn ? (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                          {host.cdn}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-500 text-[10px]">No</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="text-xs font-mono text-slate-500 py-2">
+                            No live web endpoints responded during probing.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Discovered Subdomains List (if any) */}
+                      {scanDetails.raw_output.recon.subdomains?.length > 0 && (
+                        <div className="space-y-1.5 pt-2 border-t border-slate-800/80">
+                          <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider block font-semibold">
+                            Discovered Subdomains ({scanDetails.raw_output.recon.subdomains.length})
+                          </span>
+                          <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg">
+                            {scanDetails.raw_output.recon.subdomains.map((sub, i) => (
+                              <span key={i} className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-300 border border-slate-800">
+                                {sub}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-xl bg-slate-900/30 border border-slate-800/80 text-xs font-mono text-slate-400 flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-slate-500" />
+                      <span>
+                        Reconnaissance data (subdomains, live web probing, CDN detection & testssl cryptographic audit) is gathered when executing Deep Recon scans.
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  setSelectedScan(null);
+                  setScanDetails(null);
+                }}
+                className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-mono border border-slate-800 transition-colors cursor-pointer"
+              >
+                Close Dossier
+              </button>
+
+              {selectedScan.total_vulns_found > 0 && (
+                <button
+                  onClick={() => {
+                    const sid = selectedScan.id;
+                    setSelectedScan(null);
+                    setScanDetails(null);
+                    navigate(`/vulns?scan_id=${sid}`);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.25)]"
+                >
+                  <span>Explore All {selectedScan.total_vulns_found} Vulnerability Findings</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -67,6 +67,7 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 - `completed_at` (Timestamp with timezone, Nullable)
 - `total_vulns_found` (Integer, default 0)
 - `raw_output` (JSONB)
+- `progress` (JSONB, Nullable - live progress tracking `current_stage`, `stage_number`, `stages_total`, `detail`, `hosts_processed`, `hosts_total`, `updated_at`)
 
 ### `vulnerabilities`
 - `id` (PK, UUID / Integer)
@@ -86,7 +87,7 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 - `remediation` (Text, Nullable)
 - `first_seen_at` (Timestamp with timezone)
 - `last_seen_at` (Timestamp with timezone)
-- `verification` (Enum: `version_match`, `nse_verified`, `nuclei_verified`, default `version_match`)
+- `verification` (Enum: `version_match`, `nse_verified`, `nuclei_verified`, `ssl_verified`, default `version_match`)
 - `evidence` (Text, Nullable - raw HTTP/NSE payload proof)
 - `danger_score` (Float, Nullable - composite 0-10 metric)
 - `exploitability` (Text, Nullable - ease and method of exploitation narrative)
@@ -145,9 +146,66 @@ Streamlines operator workflow by removing asset registration preconditions:
 
 ---
 
-## 5. Deep Active Verification Architecture (Phase 8)
+## 5. Deep Active Verification & Web Reconnaissance Architecture
 
-Deep scanning moves beyond probabilistic banner matching to active, evidence-backed proof of exploitability using a 3-stage pipeline:
+### A. Active Verification Engine (Phase 8)
+Deep scanning moves beyond probabilistic banner matching to active, evidence-backed proof of exploitability using a multi-engine pipeline:
+- **Nmap NSE Scripts:** Actively probe open ports for known exploits (`vuln` category). Sets `verification = nse_verified`.
+- **Nuclei v3 Engine:** Dynamic HTTP/API vulnerability and misconfiguration templates. Sets `verification = nuclei_verified`.
+- **Deduplication & Risk Pipeline:** In-place upgrades (`version_match` $\rightarrow$ verified), Danger score and contextual risk scoring.
+
+### B. Real-World Web Reconnaissance Engine & Live Progress (Phase 8.3)
+Professional external scanning must unmask virtual hosts and backend services obscured behind CDNs and reverse proxies. The 7-stage reconnaissance engine executes sequentially:
+
+```
+[Domain / IP Target]
+       │
+       ▼
+ Stage 1: Subdomain Discovery (Domain Targets)
+   • Subfinder v2 passive reconnaissance (enumerates up to 100 subdomains)
+   • Falls back to apex host if 0 subdomains found; skips if target is IPv4
+       │
+       ▼
+ Stage 2: Live Web Probing & Tech Stack Detection
+   • ProjectDiscovery httpx v1 probes HTTP/HTTPS across all subdomains
+   • Extracts status codes, page titles, CDN edge detection, and software technologies
+       │
+       ▼
+ Stage 3: Smart Port & NSE Scanning
+   • CDN-aware scanning: CDN-proxied IPs scanned light (-top-ports 100)
+   • True origin backend IPs scanned deep (-top-ports 500 + NSE vuln scripts)
+       │
+       ▼
+ Stage 4: Expanded Nuclei Active Web Exploitation
+   • Scans live web endpoints across discovered services
+   • Uses pinned Nuclei v3 with cve, exposure, misconfig, vulnerability tags
+       │
+       ▼
+ Stage 5: SSL/TLS Cryptographic Audit
+   • testssl.sh evaluates cipher suites, deprecated protocols (TLS 1.0/1.1),
+     missing HSTS, Heartbleed, ROBOT, POODLE, and certificate anomalies
+   • Sets verification = ssl_verified with cryptographic handshake evidence
+       │
+       ▼
+ Stage 6: Technology Version Vulnerability Analysis
+   • Correlates detected software versions (WordPress, PHP, Apache, nginx)
+   • Generates targeted advisories for out-of-date runtime stacks
+       │
+       ▼
+ Stage 7: Aggregation & Threat Prioritization
+   • Deduplicates findings across subdomains and ports
+   • Commits raw_output.recon dossier (subdomains, live hosts, CDN status)
+```
+
+### C. Live Progress Reporting Architecture
+- `scans.progress` JSONB column updated asynchronously in real-time during pipeline execution.
+- Tracks `current_stage`, `stage_number`, `stages_total`, `detail`, `hosts_processed`, `hosts_total`, and `updated_at`.
+- Frontend displays an active pulsing progress banner with dynamic percentage bar, stage name, elapsed timer, and host counter.
+- Scan Execution Dossier modal provides the full **Reconnaissance Summary** section (subdomain badges, live hosts table, detected tech stack pills, and CDN edge warnings).
+
+---
+
+## 6. Legacy 3-Stage Pipeline Overview (Phase 8 Reference)
 
 ```
 [Target Asset IP]
@@ -251,6 +309,7 @@ Deep scanning moves beyond probabilistic banner matching to active, evidence-bac
 - **Phase 8:** Deep Active Vulnerability Scanning + Active Verification Engine (Nmap NSE + Nuclei v3) + Threat Danger Assessment Engine.
 - **Phase 8.1:** Domain & URL Target Support with Automatic DNS Resolution, Bidirectional Conflict Detection, and Visual 🌐/🖥️ Indicators.
 - **Phase 8.2:** Direct Target Scanning (No Asset Pre-Registration Required), Automatic Asset Deduplication & Reuse, Smart Asset Type Detection, and Demo Data Lifecycle Teardown.
+- **Phase 8.3:** Real-World Web Reconnaissance Engine + Subdomain Discovery (subfinder) + Live Web Probing (httpx) + SSL/TLS Cryptographic Audit (testssl.sh) + Live Scan Progress Reporting + Scan Details Reconnaissance Dossier.
 
 ---
 

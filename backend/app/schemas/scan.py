@@ -33,6 +33,7 @@ class DirectScanResponse(BaseModel):
     status: ScanStatus = ScanStatus.running
     auto_created: bool = False
     message: Optional[str] = None
+    progress: Optional[Dict[str, Any]] = None
 
 
 class ScanRead(BaseModel):
@@ -48,6 +49,7 @@ class ScanRead(BaseModel):
     completed_at: Optional[datetime] = None
     total_vulns_found: int = 0
     raw_output: Optional[Dict[str, Any]] = None
+    progress: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 

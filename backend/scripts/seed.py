@@ -490,6 +490,38 @@ async def seed_database():
                 "days_ago": 1,
                 "remediation": "Apply VMware security patch VMSA-2021-0002 or disable the vROps plugin in compatibility config.",
             },
+            # 19. Deprecated TLS 1.0 (SSL Audit Finding)
+            {
+                "asset": created_assets["vpn-endpoint-perimeter"],
+                "scan_id": created_scans[0].id,
+                "cve_id": "SSL-TLS1-DEPRECATED",
+                "title": "Deprecated TLS 1.0 Protocol Enabled",
+                "description": "Target supports TLS 1.0, which is deprecated by IETF RFC 8996 and susceptible to cryptographic downgrade attacks.",
+                "cvss_score": 5.3,
+                "severity": VulnerabilitySeverity.medium,
+                "port": 443,
+                "service": "https",
+                "service_version": "OpenSSL 1.0.1f",
+                "status": VulnerabilityStatus.open,
+                "days_ago": 2,
+                "remediation": "Disable TLS 1.0 and TLS 1.1 in perimeter gateway cipher settings; require TLS 1.2 or TLS 1.3.",
+            },
+            # 20. Missing HSTS Header (SSL Audit Finding)
+            {
+                "asset": created_assets["web-server-prod"],
+                "scan_id": created_scans[0].id,
+                "cve_id": "SSL-MISSING-HSTS",
+                "title": "Strict-Transport-Security (HSTS) Header Missing",
+                "description": "The remote HTTPS service does not transmit an HTTP Strict Transport Security (HSTS) response header, leaving users vulnerable to SSL stripping attacks.",
+                "cvss_score": 3.7,
+                "severity": VulnerabilitySeverity.low,
+                "port": 443,
+                "service": "https",
+                "service_version": "nginx/1.18.0",
+                "status": VulnerabilityStatus.open,
+                "days_ago": 4,
+                "remediation": "Configure 'Strict-Transport-Security: max-age=31536000; includeSubDomains' in nginx/Apache SSL config.",
+            },
         ]
 
         for v_item in vulns_spec:
@@ -497,8 +529,11 @@ async def seed_database():
             risk_val = calculate_risk_score(v_item["cvss_score"], target_asset.criticality)
             first_seen = now - timedelta(days=v_item["days_ago"], hours=5, minutes=12)
 
-            # Determine verification type (famous CVEs get nse_verified for realism, others version_match)
-            if v_item["cve_id"] in ("CVE-2017-0144", "CVE-2014-0160", "CVE-2021-44228"):
+            # Determine verification type
+            if v_item["cve_id"].startswith("SSL-"):
+                ver_type = VerificationType.ssl_verified
+                evidence_text = f"testssl.sh cryptographic audit confirmed flaw on {target_asset.ip_address}:{v_item['port']}. Handshake cipher negotiation validated."
+            elif v_item["cve_id"] in ("CVE-2017-0144", "CVE-2014-0160", "CVE-2021-44228"):
                 ver_type = VerificationType.nse_verified
                 evidence_text = f"Nmap NSE script verification confirmed on port {v_item['port']}. Host returned vulnerable payload response signature."
             else:

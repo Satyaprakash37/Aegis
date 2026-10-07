@@ -67,6 +67,10 @@ class Scan(Base):
         JSONB,
         nullable=True,
     )
+    progress: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
 
     # Relationships
     asset: Mapped["Asset"] = relationship("Asset", back_populates="scans")

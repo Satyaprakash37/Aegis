@@ -181,6 +181,14 @@ export function VerificationBadge({ verification }) {
       </span>
     );
   }
+  if (v === 'ssl_verified') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-purple-500/15 text-purple-300 border-purple-500/30 shadow-[0_0_8px_rgba(168,85,247,0.15)]">
+        <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+        SSL Audit ✓
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-slate-800 text-slate-400 border-slate-700">
       Version Match

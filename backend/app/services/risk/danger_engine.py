@@ -197,6 +197,11 @@ def assess_exploitability(
             "Confirmed via active Nmap NSE vulnerability script execution. Target service "
             "responded with vulnerable protocol behavior."
         )
+    elif verification == "ssl_verified":
+        narrative = (
+            "Confirmed via cryptographic SSL/TLS handshake inspection (testssl.sh). "
+            "Target negotiated deprecated protocols, weak ciphers, or exhibited protocol weaknesses."
+        )
     else:
         narrative = (
             "Inferred from service banner and version matching against CVE database. "
