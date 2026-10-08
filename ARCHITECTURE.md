@@ -433,6 +433,32 @@ Professional external scanning must unmask virtual hosts and backend services ob
     - *Telemetry Breakdown & Transparency*: Emits real-time discovery breakdown (`subfinder: X, crt.sh: Y, brute: Z → total N`) displayed in the scan dossier reconnaissance badge. Automatically triggers a discovery notice banner if $\le 1$ subdomain is found.
     - *Privilege-Aware Firewall Evasion*: Fixed Nmap `-f` (packet fragmentation) flag by detecting non-root user execution (`os.geteuid() == 0`), ensuring origin servers (`115.241.211.x`) are deeply port-scanned without `fragscan requires root privileges` fatal errors.
 
+- **Phase 8.11: Virtual Host Resolution & Origin Infrastructure Configuration Auditing**:
+  - **Concept & Problem**:
+    - When target applications are fronted by reverse proxies or CDNs (Cloudflare, Fastly, Akamai, CloudFront), traditional vulnerability scans hit edge IP caching or WAF blocks (e.g. Cloudflare Ray 104.21.x / 172.67.x) and never reach backend application servers.
+    - Security posture auditing for authorized infrastructure requires discovering backend origin IPs and conducting non-destructive virtual host routing directly against origins to inspect true exposure, cipher suites, and misconfigurations.
+  - **Backend Pipeline (`deep_scanner.py`)**:
+    - *CDN Edge Identification (`_is_cdn_ip`)*: Validates target apex and subdomain IPs against known CDN IP blocks (Cloudflare, CloudFront, Akamai, Fastly).
+    - *Origin Resolution & Discovery (`_resolve_and_verify_origin_infrastructure`)*:
+      - Sibling subnet inference: Analyzes discovered live subdomains to extract real organization infrastructure ranges (e.g. `/24` subnets like `115.241.211.0/24`).
+      - Local Docker network inference: Automatically scans sandbox subnets (`172.20.0.0/24`) during development/testing.
+      - Virtual host verification: Employs `httpx -u https://<origin_ip> -header "Host: <domain>" -status-code -title -tech-detect -tls-verify false` to verify web endpoints responding to the virtual host domain. Matching HTTP status and title confirms origin mapping.
+    - *Origin Configuration Auditing*:
+      - Prioritized Port Scanning (Stage 3): Origin hosts are flagged with `is_cdn = False`, prioritizing deep port scanning and Nmap NSE vulnerability audits.
+      - Origin Nuclei Scanning (Stage 4): Nuclei scans target the verified origin directly with `-header "Host: <domain>"`, capturing origin-level CVEs and misconfigurations.
+      - Origin SSL/Cipher Auditing (Stage 5): Inspects origin TLS configuration and CN certificates directly.
+      - Evidence Tagging: All findings discovered via direct origin routing are tagged with `[ORIGIN CONFIG AUDIT] via virtual host routing to <origin_ip> (Host: <host_header>)`.
+  - **Schema & API Updates**:
+    - `VulnerabilityBase`: Added `is_origin_direct: bool = False`.
+    - `vulns.py`: Automatically computes `is_origin_direct` based on `[ORIGIN CONFIG AUDIT]` evidence tags.
+  - **Frontend UI & Dossier Visuals**:
+    - `Scans.jsx`: Dossier modal renders **Origin Infrastructure Map (VHost Routing & WAF Bypass)** table displaying Virtual Host Domain, Edge Proxy, Discovered Origin IP, Direct Response status code and title, and `CONFIRMED ✓` confidence chip.
+    - `Badge.jsx` & `Vulnerabilities.jsx`: Renders amber `Origin-Direct` badge chip alongside verification status in the findings table and detail modal drawer.
+  - **End-to-End Verification**:
+    - Phase A Local Sandbox: Verified with `aegis-juice-shop` (`172.20.0.2:3000`) fronted by `aegis-proxy` (`172.20.0.6:8088`), successfully mapping origin with title `"OWASP Juice Shop"`.
+    - Phase B Authorized Target: Verified against `cutm.ac.in` behind Cloudflare edge `172.67.158.164`, mapping 5 confirmed origins across `115.241.211.x` (`.179`, `.182`, `.183`, `.185`, `.178`).
+    - Automated Playwright suite verified rendering and evidence transparency with 0 console errors.
+
 ---
 
 ## 9. Operating Rules

@@ -163,37 +163,58 @@ export function ReportFormatBadge({ format }) {
   );
 }
 
-export function VerificationBadge({ verification }) {
+export function OriginDirectBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-amber-500/15 text-amber-300 border-amber-500/30 shadow-[0_0_8px_rgba(245,158,11,0.15)]" title="Discovered directly on origin infrastructure bypassing edge proxy WAF">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+      Origin-Direct
+    </span>
+  );
+}
+
+export function VerificationBadge({ verification, isOriginDirect = false }) {
   const v = String(verification || 'version_match').toLowerCase();
+  let badgeEl = null;
+
   if (v === 'nuclei_verified') {
-    return (
+    badgeEl = (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-blue-500/15 text-blue-300 border-blue-500/30 shadow-[0_0_8px_rgba(59,130,246,0.15)]">
         <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
         Nuclei Verified ✓
       </span>
     );
-  }
-  if (v === 'nse_verified') {
-    return (
+  } else if (v === 'nse_verified') {
+    badgeEl = (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-emerald-500/15 text-emerald-300 border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
         NSE Verified ✓
       </span>
     );
-  }
-  if (v === 'ssl_verified') {
-    return (
+  } else if (v === 'ssl_verified') {
+    badgeEl = (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-purple-500/15 text-purple-300 border-purple-500/30 shadow-[0_0_8px_rgba(168,85,247,0.15)]">
         <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
         SSL Audit ✓
       </span>
     );
+  } else {
+    badgeEl = (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-slate-800 text-slate-400 border-slate-700">
+        Version Match
+      </span>
+    );
   }
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border bg-slate-800 text-slate-400 border-slate-700">
-      Version Match
-    </span>
-  );
+
+  if (isOriginDirect) {
+    return (
+      <div className="inline-flex items-center gap-1.5 flex-wrap">
+        {badgeEl}
+        <OriginDirectBadge />
+      </div>
+    );
+  }
+
+  return badgeEl;
 }
 
 export function DangerScoreBadge({ score, showBar = true }) {

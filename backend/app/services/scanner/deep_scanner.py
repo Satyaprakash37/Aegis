@@ -12,6 +12,7 @@ Implements the 7-stage professional web reconnaissance and active verification e
 
 import asyncio
 import concurrent.futures
+import ipaddress
 import json
 import logging
 import os
@@ -35,6 +36,38 @@ from app.services.scanner.nmap_runner import (
 )
 
 logger = logging.getLogger("aegis.scanner.deep")
+
+CDN_CIDR_NETWORKS = [
+    ipaddress.ip_network(cidr) for cidr in [
+        # Cloudflare IPv4 ranges
+        "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "104.16.0.0/13",
+        "104.24.0.0/14", "108.162.192.0/18", "131.0.72.0/22", "141.101.64.0/18",
+        "162.158.0.0/15", "172.64.0.0/13", "173.245.48.0/20", "188.114.96.0/20",
+        "190.93.240.0/20", "197.234.240.0/22", "198.41.128.0/17",
+        # Fastly
+        "151.101.0.0/16", "199.232.0.0/16",
+        # Akamai
+        "23.0.0.0/12", "104.64.0.0/10",
+        # AWS CloudFront / WAF
+        "13.32.0.0/15", "13.35.0.0/16", "18.64.0.0/14", "52.84.0.0/15",
+        "54.192.0.0/16", "54.230.0.0/16", "65.8.0.0/16", "65.9.0.0/16",
+        "99.84.0.0/16", "99.86.0.0/16", "205.251.192.0/19",
+    ]
+]
+
+
+def _is_cdn_ip(ip_str: str) -> bool:
+    """Determine whether an IP address belongs to known CDN edge subnets."""
+    if not ip_str:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        for net in CDN_CIDR_NETWORKS:
+            if ip_obj in net:
+                return True
+    except ValueError:
+        pass
+    return False
 
 WAF_SIGNATURES: List[Tuple[str, str]] = [
     ("bitninja", "BitNinja WAF"),
@@ -413,6 +446,8 @@ def _run_stage2_live_probing(
                 webserver = (rec.get("webserver") or "").lower()
                 is_cdn = bool(
                     cdn_name or cdn_type or
+                    _is_cdn_ip(main_ip) or
+                    any(_is_cdn_ip(aip) for aip in host_ips) or
                     any(c in webserver for c in ["cloudflare", "fastly", "akamai", "cloudfront", "incapsula"])
                 )
 
@@ -466,6 +501,231 @@ def _run_stage2_live_probing(
 
     logger.info(f"[STAGE 2] Live web probing completed: {len(live_hosts)} active service(s) discovered")
     return live_hosts
+
+
+def _resolve_and_verify_origin_infrastructure(
+    live_hosts: List[Dict[str, Any]],
+    subdomains: List[str],
+    root_domain: str,
+    resolved_ip: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Stage 3.5: Virtual Host Resolution & Origin Infrastructure Mapping.
+
+    Identifies proxy-fronted domains, enumerates candidate origin server IPs via sibling
+    subnet inference and direct-hosted DNS resolutions, and actively verifies origin hosting
+    using standard virtual host routing (Host header probing).
+
+    Returns:
+        (origin_infrastructure_map, list_of_confirmed_origin_ips)
+    """
+    logger.info(f"[ORIGIN AUDIT] Initiating origin detection and vhost mapping for {root_domain}...")
+    httpx_bin = shutil.which("httpx") or "/usr/local/bin/httpx"
+    if not os.path.exists(httpx_bin):
+        logger.warning(f"[ORIGIN AUDIT] httpx binary not found at '{httpx_bin}'. Skipping origin vhost verification.")
+        return [], []
+
+    # 1. Identify proxy-fronted hosts
+    cdn_hosts: List[Dict[str, Any]] = []
+    for h in live_hosts:
+        hip = h.get("ip") or ""
+        all_ips = h.get("all_ips") or []
+        if h.get("cdn") or _is_cdn_ip(hip) or any(_is_cdn_ip(aip) for aip in all_ips):
+            cdn_hosts.append(h)
+
+    # If apex resolved IP is CDN, add root domain if not already in cdn_hosts
+    if resolved_ip and _is_cdn_ip(resolved_ip):
+        if not any(h.get("host") == root_domain for h in cdn_hosts):
+            cdn_hosts.append({
+                "host": root_domain,
+                "ip": resolved_ip,
+                "cdn_name": "Edge Proxy",
+                "url": f"https://{root_domain}",
+            })
+
+    if not cdn_hosts:
+        logger.info(f"[ORIGIN AUDIT] No CDN edge proxies detected on {root_domain}. Target is direct-hosted.")
+        return [], []
+
+    logger.info(f"[ORIGIN AUDIT] Detected {len(cdn_hosts)} CDN-fronted host(s). Enumerating candidate origin IPs...")
+
+    # 2. Candidate Origin Gathering
+    candidate_ips: Set[str] = set()
+
+    # A. Sibling Subnet Inference from Direct-Hosted Subdomains
+    direct_ips: Set[str] = set()
+    for h in live_hosts:
+        hip = h.get("ip") or ""
+        if hip and hip != "127.0.0.1" and not _is_cdn_ip(hip):
+            direct_ips.add(hip)
+        for aip in h.get("all_ips") or []:
+            if aip and aip != "127.0.0.1" and not _is_cdn_ip(aip):
+                direct_ips.add(aip)
+
+    # Also resolve top direct/internal subdomains to uncover non-CDN IPs
+    for sub in subdomains[:40]:
+        try:
+            sip = socket.gethostbyname(sub)
+            if sip and sip != "127.0.0.1" and not _is_cdn_ip(sip):
+                direct_ips.add(sip)
+        except Exception:
+            pass
+
+    # For every direct IP, add the IP itself and test adjacent sibling IPs in its /24
+    for dip in direct_ips:
+        candidate_ips.add(dip)
+        parts = dip.split(".")
+        if len(parts) == 4:
+            prefix = ".".join(parts[:3])
+            try:
+                last_byte = int(parts[3])
+                for delta in range(-6, 8):
+                    b = last_byte + delta
+                    if 1 <= b <= 254:
+                        candidate_ips.add(f"{prefix}.{b}")
+            except ValueError:
+                pass
+
+    # B. Private/Sandbox Network Support (e.g., Docker 172.20.0.x / 192.168.x / 10.x)
+    for ch in cdn_hosts:
+        cip = ch.get("ip") or ""
+        if cip.startswith("172.") or cip.startswith("192.168.") or cip.startswith("10."):
+            parts = cip.split(".")
+            if len(parts) == 4:
+                prefix = ".".join(parts[:3])
+                for b in range(1, 15):
+                    candidate_ips.add(f"{prefix}.{b}")
+
+    # Exclude CDN IPs, loopbacks, and the proxy edge IPs themselves
+    proxy_edge_ips = {ch.get("ip") for ch in cdn_hosts if ch.get("ip")}
+    if resolved_ip:
+        proxy_edge_ips.add(resolved_ip)
+
+    filtered_candidates = [
+        ip for ip in candidate_ips
+        if not _is_cdn_ip(ip) and ip not in ("127.0.0.1", "0.0.0.0") and ip not in proxy_edge_ips
+    ]
+    # Prioritize exact direct IPs discovered first
+    ordered_candidates = list(direct_ips.intersection(filtered_candidates)) + [
+        ip for ip in filtered_candidates if ip not in direct_ips
+    ]
+    # Cap to top 25 candidates for swift execution
+    ordered_candidates = ordered_candidates[:25]
+    logger.info(f"[ORIGIN AUDIT] Testing {len(ordered_candidates)} candidate origin IPs across virtual hosts...")
+
+    # 3. Virtual Host Verification Probe
+    origin_map: List[Dict[str, Any]] = []
+    confirmed_origin_ips: Set[str] = set()
+
+    # Target vhosts to test: primary apex and top 2 CDN subdomains
+    target_vhosts = []
+    seen_vhosts = set()
+    for ch in cdn_hosts:
+        vhost = ch.get("host") or root_domain
+        if vhost not in seen_vhosts:
+            seen_vhosts.add(vhost)
+            target_vhosts.append(ch)
+    target_vhosts = target_vhosts[:3]
+
+    for vhost_entry in target_vhosts:
+        vhost_domain = vhost_entry.get("host") or root_domain
+        proxy_ip = vhost_entry.get("ip") or ""
+        proxy_name = vhost_entry.get("cdn_name") or "Edge Proxy"
+
+        # Determine ports to probe
+        ports_to_probe = [443, 80]
+        # In docker/private environments, include port 3000 (Juice Shop / internal services)
+        if any(c.startswith("172.") or c.startswith("10.") or c.startswith("192.168.") for c in ordered_candidates):
+            ports_to_probe.extend([3000, 8080])
+
+        for cand_ip in ordered_candidates:
+            for port in ports_to_probe:
+                scheme = "https" if port in (443, 8443) else "http"
+                target_url = f"{scheme}://{cand_ip}:{port}"
+                cmd = [
+                    httpx_bin,
+                    "-u", target_url,
+                    "-H", f"Host: {vhost_domain}",
+                    "-status-code",
+                    "-title",
+                    "-tech-detect",
+                    "-silent",
+                    "-json",
+                    "-timeout", "4",
+                    "-retries", "1",
+                ]
+                try:
+                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+                    for line in proc.stdout.splitlines():
+                        line = line.strip()
+                        if not line.startswith("{"):
+                            continue
+                        try:
+                            rec = json.loads(line)
+                            sc = rec.get("status_code")
+                            if not sc:
+                                continue
+
+                            title = rec.get("title") or ""
+                            tech = rec.get("tech") or []
+                            title_lower = title.lower()
+                            domain_core = root_domain.split(".")[0].lower()
+
+                            # Criteria for confirmed origin:
+                            # 1) HTTP 200 with domain name or app in title
+                            # 2) HTTP 200 without CDN error page
+                            # 3) Redirect (301, 302, 307, 308) indicating vhost dispatching
+                            is_confirmed = False
+                            if sc == 200:
+                                if (
+                                    domain_core in title_lower or
+                                    "centurion" in title_lower or
+                                    "cutm" in title_lower or
+                                    "juice shop" in title_lower or
+                                    (title and "cloudflare" not in title_lower and "access denied" not in title_lower)
+                                ):
+                                    is_confirmed = True
+                                elif len(rec.get("a") or []) > 0:
+                                    is_confirmed = True
+                            elif sc in (301, 302, 307, 308):
+                                is_confirmed = True
+
+                            confidence = "confirmed" if is_confirmed else "inferred"
+                            if is_confirmed:
+                                confirmed_origin_ips.add(cand_ip)
+
+                            mapping_entry = {
+                                "domain": vhost_domain,
+                                "proxy_ip": proxy_ip,
+                                "proxy_name": proxy_name,
+                                "origin_ip": cand_ip,
+                                "origin_port": port,
+                                "scheme": scheme,
+                                "confidence": confidence,
+                                "status_code": sc,
+                                "title": title or ("Active Service" if sc == 200 else f"HTTP {sc}"),
+                                "tech": tech,
+                                "routed_via": f"Host: {vhost_domain}",
+                            }
+                            # Deduplicate mapping entries
+                            if not any(
+                                m["domain"] == vhost_domain and m["origin_ip"] == cand_ip and m["origin_port"] == port
+                                for m in origin_map
+                            ):
+                                origin_map.append(mapping_entry)
+                                logger.info(
+                                    f"[ORIGIN AUDIT] Discovered origin {cand_ip}:{port} for {vhost_domain} "
+                                    f"({confidence.upper()} - HTTP {sc} '{title}')"
+                                )
+                        except json.JSONDecodeError:
+                            continue
+                except Exception as e:
+                    logger.debug(f"[ORIGIN AUDIT] Probe exception for {target_url}: {e}")
+
+    logger.info(
+        f"[ORIGIN AUDIT] Mapping completed: {len(origin_map)} total origin mappings, "
+        f"{len(confirmed_origin_ips)} confirmed origin IP(s) bypassing edge proxy."
+    )
+    return origin_map, list(confirmed_origin_ips)
 
 
 def _run_stage3_port_scan_single_ip(
@@ -648,8 +908,11 @@ def _parse_nuclei_record(
 def _run_stage4_nuclei_target(
     url: str,
     open_ports: List[Dict[str, Any]],
+    host_header: Optional[str] = None,
+    is_origin: bool = False,
+    origin_ip: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Execute expanded Nuclei scan on a single target URL."""
+    """Execute expanded Nuclei scan on a single target URL (with optional vhost routing)."""
     nuclei_bin = shutil.which("nuclei") or "/usr/local/bin/nuclei"
     if not os.path.exists(nuclei_bin):
         return []
@@ -658,6 +921,7 @@ def _run_stage4_nuclei_target(
     findings: List[Dict[str, Any]] = []
 
     # Run CVE, vulnerability, exposure, misconfig checks
+    rate_limit = "15" if not is_origin else "25"
     cmd = [
         nuclei_bin,
         "-target", url,
@@ -666,11 +930,15 @@ def _run_stage4_nuclei_target(
         "-tags", "cve,exposure,misconfig,vulnerability,unauth",
         "-silent",
         "-jsonl",
-        "-timeout", "10",
-        "-rl", "25",
+        "-timeout", "12",
+        "-rl", rate_limit,
         "-concurrency", "15",
         "-max-host-error", "10",
     ]
+
+    # If origin scan with virtual host routing, attach Host header and bypass TLS validation
+    if host_header:
+        cmd.extend(["-header", f"Host: {host_header}", "-tls-verify", "false"])
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -687,6 +955,14 @@ def _run_stage4_nuclei_target(
                     record = json.loads(line)
                     parsed = _parse_nuclei_record(record, url, open_ports)
                     if parsed:
+                        if is_origin:
+                            parsed["is_origin_direct"] = True
+                            parsed["origin_ip"] = origin_ip or url
+                            prefix = (
+                                f"[ORIGIN CONFIG AUDIT] via virtual host routing to "
+                                f"{origin_ip or url} (Host: {host_header})\n"
+                            )
+                            parsed["evidence"] = prefix + parsed.get("evidence", "")
                         findings.append(parsed)
                 except json.JSONDecodeError:
                     continue
@@ -828,8 +1104,13 @@ def _parse_testssl_records(
     return findings
 
 
-def _run_stage5_testssl_target(target: str) -> List[Dict[str, Any]]:
-    """Stage 5: Execute testssl.sh on a single target hostname/IP."""
+def _run_stage5_testssl_target(
+    target: str,
+    is_origin: bool = False,
+    origin_ip: Optional[str] = None,
+    host_header: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Stage 5: Execute testssl.sh on a single target hostname/IP (with optional origin tagging)."""
     testssl_bin = shutil.which("testssl.sh") or "/usr/local/bin/testssl.sh"
     if not os.path.exists(testssl_bin):
         logger.warning(f"[STAGE 5] testssl.sh not found at '{testssl_bin}'. Skipping.")
@@ -859,7 +1140,17 @@ def _run_stage5_testssl_target(target: str) -> List[Dict[str, Any]]:
                 content = f.read().strip()
                 if content.startswith("["):
                     records = json.loads(content)
-                    return _parse_testssl_records(records, clean_target)
+                    raw_findings = _parse_testssl_records(records, clean_target)
+                    if is_origin:
+                        for rf in raw_findings:
+                            rf["is_origin_direct"] = True
+                            rf["origin_ip"] = origin_ip or clean_target
+                            prefix = (
+                                f"[ORIGIN CONFIG AUDIT] via virtual host routing to "
+                                f"{origin_ip or clean_target} (Host: {host_header})\n"
+                            )
+                            rf["evidence"] = prefix + rf.get("evidence", "")
+                    return raw_findings
     except Exception as e:
         logger.error(f"[STAGE 5] testssl.sh error on {clean_target}: {e}")
     finally:
@@ -993,14 +1284,40 @@ async def run_deep_scan(
         }]
 
     # -------------------------------------------------------------
+    # STAGE 2.5: Virtual Host Resolution & Origin Infrastructure Mapping
+    # -------------------------------------------------------------
+    origin_map: List[Dict[str, Any]] = []
+    confirmed_origin_ips: List[str] = []
+
+    if is_domain:
+        await report_progress(3, "origin_mapping", "Auditing proxy fronting and performing virtual host origin mapping...")
+        origin_map, confirmed_origin_ips = await asyncio.to_thread(
+            _resolve_and_verify_origin_infrastructure,
+            live_hosts,
+            subdomains,
+            root_domain,
+            resolved_ip,
+        )
+        if origin_map:
+            conf_count = len([m for m in origin_map if m.get("confidence") == "confirmed"])
+            await report_progress(
+                3,
+                "origin_mapping",
+                f"Origin mapping: {len(origin_map)} origin route(s) mapped ({conf_count} confirmed bypassing edge proxy)",
+            )
+
+    # -------------------------------------------------------------
     # STAGE 3: Smart Port Scanning
     # -------------------------------------------------------------
-    # Build list of distinct IPs to port scan
+    # Build list of distinct IPs to port scan (prioritizing confirmed origin IPs without CDN flag)
     ip_map: Dict[str, bool] = {}
+    for o_ip in confirmed_origin_ips:
+        ip_map[o_ip] = False
+
     if is_domain:
         for h in live_hosts:
             hip = h.get("ip")
-            if hip and hip != "127.0.0.1":
+            if hip and hip != "127.0.0.1" and hip not in ip_map:
                 ip_map[hip] = h.get("cdn", False)
             for extra_ip in h.get("all_ips", []):
                 if extra_ip and extra_ip not in ip_map and extra_ip != "127.0.0.1":
@@ -1010,7 +1327,7 @@ async def run_deep_scan(
     else:
         ip_map[target] = False
 
-    # Limit port scanning to top 6 unique IPs
+    # Limit port scanning to top 6 unique IPs (origin servers prioritized!)
     target_ips = list(ip_map.keys())[:6] or [resolved_ip or target]
     await report_progress(3, "smart_port_scanning", f"Port scanning {len(target_ips)} target IP addresses...")
 
@@ -1029,7 +1346,7 @@ async def run_deep_scan(
         ]
 
     # -------------------------------------------------------------
-    # STAGE 4: Expanded Nuclei Active Web Exploitation (Parallelized & Filtered)
+    # STAGE 4: Expanded Nuclei Active Web Exploitation & Origin Config Audit
     # -------------------------------------------------------------
     # Intelligent Target Reduction:
     # 1. Skip dead weight: 404, 502, 503, 504 errors
@@ -1055,7 +1372,7 @@ async def run_deep_scan(
 
     nuclei_targets: List[str] = [h["url"] for h in valid_candidates if h.get("url")]
 
-    # Cap Nuclei targets to top 10 unique, active URLs
+    # Cap Nuclei edge targets to top 10 unique, active URLs
     nuclei_targets = nuclei_targets[:10]
     if not nuclei_targets:
         # Fallback to web ports discovered
@@ -1064,35 +1381,64 @@ async def run_deep_scan(
             scheme = "https" if port_num in (443, 8443) else "http"
             nuclei_targets.append(f"{scheme}://{p.get('ip', target)}:{port_num}")
 
+    # Build origin audit tasks (Nuclei with virtual host routing headers)
+    origin_nuclei_tasks: List[Tuple[str, str, str]] = []
+    seen_origin_keys = set()
+    for om in origin_map:
+        if om.get("confidence") == "confirmed":
+            orig_url = f"{om['scheme']}://{om['origin_ip']}:{om['origin_port']}"
+            orig_host = om["domain"]
+            orig_key = (orig_url, orig_host)
+            if orig_key not in seen_origin_keys:
+                seen_origin_keys.add(orig_key)
+                origin_nuclei_tasks.append((orig_url, orig_host, om["origin_ip"]))
+
+    total_nuclei_work = len(nuclei_targets) + len(origin_nuclei_tasks)
     await report_progress(
         4,
         "nuclei_web_scanning",
-        f"Launching parallel Nuclei scanning on {len(nuclei_targets)} target endpoints...",
+        f"Launching parallel Nuclei scanning on {len(nuclei_targets)} edge targets + {len(origin_nuclei_tasks)} origin audits...",
         hosts_processed=0,
-        hosts_total=len(nuclei_targets),
+        hosts_total=total_nuclei_work,
     )
 
     # Parallelize Nuclei scanning across up to 4 concurrent processes
     sem = asyncio.Semaphore(4)
     completed_nuclei = 0
 
-    async def scan_single_target(n_url: str) -> List[Dict[str, Any]]:
+    async def scan_single_target(
+        n_url: str,
+        host_header: Optional[str] = None,
+        is_origin: bool = False,
+        origin_ip: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         nonlocal completed_nuclei
         async with sem:
-            logger.info(f"[STAGE 4] Starting parallel Nuclei worker on {n_url}")
-            results = await asyncio.to_thread(_run_stage4_nuclei_target, n_url, all_open_ports)
+            logger.info(f"[STAGE 4] Starting parallel Nuclei worker on {n_url} (origin={is_origin}, host={host_header})")
+            results = await asyncio.to_thread(
+                _run_stage4_nuclei_target,
+                n_url,
+                all_open_ports,
+                host_header,
+                is_origin,
+                origin_ip,
+            )
             completed_nuclei += 1
             await report_progress(
                 4,
                 "nuclei_web_scanning",
-                f"Nuclei: completed {completed_nuclei}/{len(nuclei_targets)} targets ({n_url})",
+                f"Nuclei: completed {completed_nuclei}/{total_nuclei_work} targets ({n_url})",
                 hosts_processed=completed_nuclei,
-                hosts_total=len(nuclei_targets),
+                hosts_total=total_nuclei_work,
             )
             return results
 
-    if nuclei_targets:
-        nuclei_batches = await asyncio.gather(*[scan_single_target(u) for u in nuclei_targets], return_exceptions=True)
+    coros = [scan_single_target(u) for u in nuclei_targets]
+    for orig_url, orig_host, orig_ip in origin_nuclei_tasks:
+        coros.append(scan_single_target(orig_url, host_header=orig_host, is_origin=True, origin_ip=orig_ip))
+
+    if coros:
+        nuclei_batches = await asyncio.gather(*coros, return_exceptions=True)
         for res in nuclei_batches:
             if isinstance(res, list):
                 all_findings.extend(res)
@@ -1100,7 +1446,7 @@ async def run_deep_scan(
                 logger.error(f"[STAGE 4] Nuclei worker error: {res}")
 
     # -------------------------------------------------------------
-    # STAGE 5: SSL/TLS Cryptographic Audit (testssl.sh) - Unique IP Deduplicated
+    # STAGE 5: SSL/TLS Cryptographic Audit (testssl.sh) & Origin TLS Audit
     # -------------------------------------------------------------
     # Find HTTPS hosts for testssl - only 1 audit per unique IP (same server = same cert)
     ssl_candidates: List[str] = []
@@ -1126,13 +1472,31 @@ async def run_deep_scan(
                 if cand not in ssl_candidates:
                     ssl_candidates.append(cand)
 
-    # Cap testssl audits to top 3 hosts
+    # Cap testssl audits to top 3 edge hosts
     ssl_targets = ssl_candidates[:3]
-    await report_progress(5, "ssl_tls_audit", f"Auditing SSL/TLS security on {len(ssl_targets)} endpoints...", hosts_processed=0, hosts_total=len(ssl_targets))
 
+    # Origin TLS audits: if origin server speaks HTTPS
+    origin_ssl_audits: List[Tuple[str, str, str]] = []
+    for om in origin_map:
+        if om.get("confidence") == "confirmed" and om.get("scheme") == "https":
+            t_spec = f"{om['origin_ip']}:{om['origin_port']}"
+            if not any(a[0] == t_spec for a in origin_ssl_audits):
+                origin_ssl_audits.append((t_spec, om["origin_ip"], om["domain"]))
+
+    total_ssl_targets = len(ssl_targets) + len(origin_ssl_audits)
+    await report_progress(5, "ssl_tls_audit", f"Auditing SSL/TLS security on {total_ssl_targets} endpoints...", hosts_processed=0, hosts_total=total_ssl_targets)
+
+    completed_ssl = 0
     for idx, ssl_target in enumerate(ssl_targets, start=1):
-        await report_progress(5, "ssl_tls_audit", f"testssl: auditing {idx}/{len(ssl_targets)} ({ssl_target})...", hosts_processed=idx, hosts_total=len(ssl_targets))
+        completed_ssl += 1
+        await report_progress(5, "ssl_tls_audit", f"testssl: auditing {completed_ssl}/{total_ssl_targets} ({ssl_target})...", hosts_processed=completed_ssl, hosts_total=total_ssl_targets)
         ssl_f = await asyncio.to_thread(_run_stage5_testssl_target, ssl_target)
+        all_findings.extend(ssl_f)
+
+    for t_spec, orig_ip, orig_host in origin_ssl_audits:
+        completed_ssl += 1
+        await report_progress(5, "ssl_tls_audit", f"testssl: origin audit {completed_ssl}/{total_ssl_targets} ({t_spec})...", hosts_processed=completed_ssl, hosts_total=total_ssl_targets)
+        ssl_f = await asyncio.to_thread(_run_stage5_testssl_target, t_spec, is_origin=True, origin_ip=orig_ip, host_header=orig_host)
         all_findings.extend(ssl_f)
 
     # -------------------------------------------------------------
@@ -1186,8 +1550,11 @@ async def run_deep_scan(
         "cdn_name": cdn_name,
         "waf_detected": bool(waf_name),
         "waf_name": waf_name,
+        "origin_infrastructure_map": origin_map,
+        "origin_count": len(confirmed_origin_ips),
+        "waf_bypass_possible": len(confirmed_origin_ips) > 0,
         "backend_ips": target_ips,
-        "ssl_audited_count": len(ssl_targets),
+        "ssl_audited_count": total_ssl_targets,
         "technologies_summary": sorted(list(all_tech)),
         "ports_discovered_count": len(all_open_ports),
     }
@@ -1195,14 +1562,15 @@ async def run_deep_scan(
     await report_progress(
         7,
         "completed",
-        f"Recon scan completed: {len(deduped_findings)} vulnerabilities identified across {len(live_hosts)} services",
+        f"Recon scan completed: {len(deduped_findings)} vulnerabilities identified across {len(live_hosts)} services ({len(confirmed_origin_ips)} confirmed origins mapped)",
         hosts_processed=len(live_hosts),
         hosts_total=len(live_hosts),
     )
 
     logger.info(
         f"=== COMPLETED DEEP RECON SCAN ON {target}: {len(all_open_ports)} ports, "
-        f"{len(deduped_findings)} findings, {len(subdomains)} subdomains, {len(live_hosts)} live hosts ==="
+        f"{len(deduped_findings)} findings, {len(subdomains)} subdomains, {len(live_hosts)} live hosts, "
+        f"{len(origin_map)} origin routes ({len(confirmed_origin_ips)} confirmed) ==="
     )
 
     return all_open_ports, deduped_findings, recon_summary

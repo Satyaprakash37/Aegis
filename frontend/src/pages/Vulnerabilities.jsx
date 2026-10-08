@@ -394,7 +394,10 @@ export default function Vulnerabilities() {
 
                     {/* Verification */}
                     <td className="py-3.5 px-4">
-                      <VerificationBadge verification={v.verification} />
+                      <VerificationBadge
+                        verification={v.verification}
+                        isOriginDirect={v.is_origin_direct || (v.evidence && v.evidence.includes('[ORIGIN CONFIG AUDIT]'))}
+                      />
                     </td>
 
                     {/* Danger Score */}
@@ -526,7 +529,10 @@ export default function Vulnerabilities() {
                     )}
                   </h3>
                   <SeverityBadge severity={selectedVuln.severity} />
-                  <VerificationBadge verification={selectedVuln.verification} />
+                  <VerificationBadge
+                    verification={selectedVuln.verification}
+                    isOriginDirect={selectedVuln.is_origin_direct || (selectedVuln.evidence && selectedVuln.evidence.includes('[ORIGIN CONFIG AUDIT]'))}
+                  />
                   <VulnStatusBadge status={selectedVuln.status} />
                   {selectedVuln.public_exploit && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
@@ -607,7 +613,10 @@ export default function Vulnerabilities() {
                     <Terminal className="w-3.5 h-3.5 text-cyan-400" />
                     <span>Active Verification Evidence & Raw Output</span>
                   </div>
-                  <VerificationBadge verification={selectedVuln.verification} />
+                  <VerificationBadge
+                    verification={selectedVuln.verification}
+                    isOriginDirect={selectedVuln.is_origin_direct || (selectedVuln.evidence && selectedVuln.evidence.includes('[ORIGIN CONFIG AUDIT]'))}
+                  />
                 </h4>
                 {selectedVuln.evidence ? (
                   <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800">

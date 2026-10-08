@@ -19,9 +19,10 @@ import {
   Crosshair,
   Globe,
   Layers,
-  ShieldCheck,
   AlertTriangle,
   Lock,
+  ShieldCheck,
+  Shield,
   X
 } from 'lucide-react';
 import api from '../api/client';
@@ -1342,6 +1343,74 @@ export default function Scans() {
                           </p>
                         )}
                       </div>
+
+                      {/* ORIGIN INFRASTRUCTURE MAP (VHOST ROUTING & WAF BYPASS) */}
+                      {scanDetails.raw_output.recon.origin_infrastructure_map?.length > 0 && (
+                        <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                          <div className="flex items-center justify-between text-xs font-mono">
+                            <div className="flex items-center gap-2">
+                              <Shield className="w-3.5 h-3.5 text-purple-400" />
+                              <span className="uppercase tracking-wider font-semibold text-purple-300">
+                                Origin Infrastructure Map (VHost Routing & WAF Bypass)
+                              </span>
+                            </div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-950/60 text-purple-300 border border-purple-800/40">
+                              {scanDetails.raw_output.recon.origin_infrastructure_map.length} Origins Mapped
+                            </span>
+                          </div>
+
+                          <div className="border border-purple-900/30 rounded-lg overflow-hidden bg-slate-950">
+                            <table className="w-full text-left text-xs font-mono">
+                              <thead>
+                                <tr className="border-b border-purple-950/60 bg-purple-950/20 text-purple-300 text-[11px]">
+                                  <th className="py-2.5 px-3">Virtual Host Domain</th>
+                                  <th className="py-2.5 px-3">Proxy / CDN Edge</th>
+                                  <th className="py-2.5 px-3">Discovered Origin IP</th>
+                                  <th className="py-2.5 px-3">Direct Response</th>
+                                  <th className="py-2.5 px-3 text-right">Confidence</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/50">
+                                {scanDetails.raw_output.recon.origin_infrastructure_map.map((orig, oi) => (
+                                  <tr key={oi} className="hover:bg-slate-900/30">
+                                    <td className="py-2.5 px-3 font-semibold text-cyan-300">
+                                      {orig.domain}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-400">
+                                      {orig.proxy_ip || 'Edge Proxy'} ({orig.proxy_name || 'CDN'})
+                                    </td>
+                                    <td className="py-2.5 px-3 font-semibold text-amber-300">
+                                      {orig.origin_ip}:{orig.origin_port || 443}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-300">
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mr-1.5">
+                                        HTTP {orig.status_code || 200}
+                                      </span>
+                                      <span className="text-slate-400 truncate inline-block max-w-[180px] align-bottom" title={orig.title}>
+                                        {orig.title || 'OK'}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right">
+                                      {orig.confidence === 'confirmed' ? (
+                                        <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold shadow-[0_0_8px_rgba(16,185,129,0.15)]">
+                                          CONFIRMED ✓
+                                        </span>
+                                      ) : (
+                                        <span className="px-2 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold">
+                                          INFERRED
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <p className="text-[11px] font-sans text-slate-400 italic">
+                            Virtual host routing bypassed the edge proxy layer, establishing direct telemetry with the backend origin server. Auditing measures the origin's direct hardening posture.
+                          </p>
+                        </div>
+                      )}
 
                       {/* Discovered Subdomains List (if any) */}
                       {scanDetails.raw_output.recon.subdomains?.length > 0 && (
