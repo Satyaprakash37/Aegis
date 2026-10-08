@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, require_admin, require_analyst_or_admin
 from app.db.session import get_db
+from app.models.asset import Asset
 from app.models.user import User
 from app.models.vulnerability import (
     VerificationType,
@@ -117,8 +118,17 @@ async def list_vulnerabilities(
     order: Optional[str] = Query("desc", description="Sort direction: asc or desc"),
 ) -> VulnerabilityListResponse:
     """List detected vulnerabilities with filtering and sortable columns."""
-    query = select(Vulnerability).options(selectinload(Vulnerability.asset))
-    count_query = select(func.count(Vulnerability.id))
+    query = (
+        select(Vulnerability)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
+        .options(selectinload(Vulnerability.asset))
+        .where(Asset.owner_id == current_user.id)
+    )
+    count_query = (
+        select(func.count(Vulnerability.id))
+        .join(Asset, Vulnerability.asset_id == Asset.id)
+        .where(Asset.owner_id == current_user.id)
+    )
 
     if severity:
         query = query.where(Vulnerability.severity == severity)
@@ -188,7 +198,12 @@ async def get_vulnerability(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> VulnerabilityRead:
     """Retrieve full details of a specific vulnerability finding."""
-    query = select(Vulnerability).options(selectinload(Vulnerability.asset)).where(Vulnerability.id == id)
+    query = (
+        select(Vulnerability)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
+        .options(selectinload(Vulnerability.asset))
+        .where(Vulnerability.id == id, Asset.owner_id == current_user.id)
+    )
     vuln = (await db.execute(query)).scalar_one_or_none()
 
     if not vuln:
@@ -208,7 +223,12 @@ async def update_vulnerability_status(
     current_user: Annotated[User, Depends(require_analyst_or_admin)],
 ) -> VulnerabilityRead:
     """Update lifecycle status of a vulnerability finding (open, in_progress, mitigated, false_positive)."""
-    query = select(Vulnerability).options(selectinload(Vulnerability.asset)).where(Vulnerability.id == id)
+    query = (
+        select(Vulnerability)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
+        .options(selectinload(Vulnerability.asset))
+        .where(Vulnerability.id == id, Asset.owner_id == current_user.id)
+    )
     vuln = (await db.execute(query)).scalar_one_or_none()
 
     if not vuln:

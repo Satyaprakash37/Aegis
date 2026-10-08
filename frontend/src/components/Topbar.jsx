@@ -155,7 +155,7 @@ export default function Topbar() {
   const activeScan = systemHealth?.active_scan;
 
   return (
-    <header className="h-16 bg-slate-950/70 backdrop-blur-md border-b border-slate-800 px-6 sm:px-8 flex items-center justify-between sticky top-0 z-30">
+    <header className="h-16 bg-[#0a0f1c]/90 backdrop-blur-md border-b border-white/5 px-6 sm:px-8 flex items-center justify-between sticky top-0 z-30">
       {/* App Branding and Active Indicator */}
       <div className="flex items-center gap-4">
         <h1 className="text-base font-semibold text-slate-100 flex items-center gap-2">

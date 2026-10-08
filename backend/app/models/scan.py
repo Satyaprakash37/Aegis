@@ -11,6 +11,7 @@ from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.asset import Asset
+    from app.models.user import User
     from app.models.vulnerability import Vulnerability
 
 
@@ -71,8 +72,15 @@ class Scan(Base):
         JSONB,
         nullable=True,
     )
+    created_by: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
+    creator_user: Mapped[Optional["User"]] = relationship("User", back_populates="scans")
     asset: Mapped["Asset"] = relationship("Asset", back_populates="scans")
     vulnerabilities: Mapped[List["Vulnerability"]] = relationship(
         "Vulnerability",

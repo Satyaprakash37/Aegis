@@ -43,12 +43,12 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 text-slate-100 px-4 relative overflow-hidden">
+    <div className="min-h-screen w-full flex items-center justify-center bg-[#0b1220] text-slate-100 px-4 relative overflow-hidden">
       {/* Background Ambience */}
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="w-full max-w-md bg-slate-950/80 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-2xl p-8 relative z-10">
+      <div className="w-full max-w-md bg-[#111a2e]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-8 relative z-10">
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center mb-8">
           <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.2)] mb-4">

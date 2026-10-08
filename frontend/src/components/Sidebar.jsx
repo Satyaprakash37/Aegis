@@ -42,11 +42,11 @@ export default function Sidebar() {
   ];
 
   return (
-    <aside className="w-64 bg-slate-950/80 backdrop-blur-md border-r border-slate-800 flex flex-col h-screen select-none shrink-0">
+    <aside className="w-64 bg-[#0a0f1c] backdrop-blur-md border-r border-white/5 flex flex-col h-screen select-none shrink-0">
       {/* Brand Header */}
       <div 
         onClick={() => navigate('/')}
-        className="h-16 flex items-center px-6 gap-3 border-b border-slate-800/80 bg-slate-950 cursor-pointer"
+        className="h-16 flex items-center px-6 gap-3 border-b border-white/5 bg-[#0a0f1c] cursor-pointer"
       >
         <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
           <Shield className="w-5 h-5 text-cyan-400" />
@@ -98,8 +98,8 @@ export default function Sidebar() {
       </nav>
 
       {/* Bottom Telemetry Footer */}
-      <div className="p-4 border-t border-slate-800/80 bg-slate-950/60">
-        <div className="rounded-lg bg-slate-900/90 border border-slate-800 p-3 text-xs space-y-2">
+      <div className="p-4 border-t border-white/5 bg-[#0a0f1c]">
+        <div className="rounded-lg bg-[#111a2e] border border-white/5 p-3 text-xs space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-slate-400 font-mono text-[11px] flex items-center gap-1.5">
               <Cpu className="w-3.5 h-3.5 text-cyan-400" /> Engine
@@ -109,7 +109,7 @@ export default function Sidebar() {
               v1.0.0
             </span>
           </div>
-          <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono pt-1 border-t border-slate-800">
+          <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono pt-1 border-t border-white/5">
             <span>Framework</span>
             <span className="text-slate-400">FastAPI + React</span>
           </div>

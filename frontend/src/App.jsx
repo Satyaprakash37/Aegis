@@ -40,7 +40,7 @@ function ProtectedRoute({ children }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-900 text-slate-100 font-mono">
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-[#0b1220] text-slate-100 font-mono">
         <Loader2 className="w-8 h-8 text-cyan-400 animate-spin mb-4" />
         <span className="text-xs uppercase tracking-widest text-slate-400">Verifying Security Credentials...</span>
       </div>
@@ -56,11 +56,11 @@ function ProtectedRoute({ children }) {
 
 function AppLayout() {
   return (
-    <div className="flex h-screen w-full bg-slate-900 text-slate-100 overflow-hidden font-sans">
+    <div className="flex h-screen w-full bg-[#0b1220] text-slate-100 overflow-hidden font-sans">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Topbar />
-        <main className="flex-1 overflow-y-auto p-8 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950">
+        <main className="flex-1 overflow-y-auto p-8 bg-gradient-to-b from-[#0f172a] via-[#0b1220] to-[#080d18]">
           <div className="max-w-6xl mx-auto">
             <Outlet />
           </div>

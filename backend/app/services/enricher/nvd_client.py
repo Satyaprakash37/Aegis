@@ -147,6 +147,10 @@ SOFTWARE_GENERATION_YEARS: Dict[str, Dict[str, int]] = {
     "OpenSSH": {
         "9.": 2022,
         "8.": 2019,
+        "7.": 2015,
+        "6.6": 2014,
+        "6.": 2012,
+        "5.": 2008,
     },
     "nginx": {
         "1.31": 2025,
@@ -266,12 +270,35 @@ def is_cve_applicable(
 
     # Rule D: General Minimum Version Guard (5+ years older than known branch release)
     branch_years = SOFTWARE_GENERATION_YEARS.get(product, {})
+    if not branch_years:
+        for p_name, p_dict in SOFTWARE_GENERATION_YEARS.items():
+            if p_name.lower() == prod_lower:
+                branch_years = p_dict
+                break
+
     for branch_prefix, release_year in branch_years.items():
         if version.startswith(branch_prefix):
             if cve_year > 0 and cve_year < (release_year - 4):
                 logger.info(f"Temporal guard triggered for {cve_id} on {product} {version} ({cve_year} is >4 yrs older than {release_year})")
                 return False
             break
+
+    # Rule D2: OpenSSH specific ancient CVE protection
+    if "openssh" in prod_lower or "ssh" in prod_lower:
+        if cve_id in ("CVE-1999-0661", "CVE-2000-0525"):
+            logger.info(f"Filtering false positive {cve_id}: obsolete OpenSSH CVE on modern host ({product} {version})")
+            return False
+        if any(version.startswith(v) for v in ("6.", "7.", "8.", "9.")) and cve_year > 0 and cve_year < 2012:
+            logger.info(f"Filtering false positive {cve_id}: pre-dates OpenSSH 6.x+ ({cve_year} < 2012)")
+            return False
+
+    # Rule D3: Mail/Submission false positives (VirusWall, RemoteEditor)
+    if ("smtpscan" in desc_lower or "viruswall" in desc_lower) and "viruswall" not in prod_lower:
+        logger.info(f"Filtering false positive {cve_id}: VirusWall CVE applied to non-VirusWall service ({product})")
+        return False
+    if ("remoteeditor" in desc_lower or "remote editor" in desc_lower) and "remoteeditor" not in prod_lower:
+        logger.info(f"Filtering false positive {cve_id}: RemoteEditor CVE applied to non-RemoteEditor service ({product})")
+        return False
 
     # Rule E: Version Upper Bound Check in CVE text
     # e.g., "before 5.7.12", "through 5.6.30", "earlier than 2.4.50"

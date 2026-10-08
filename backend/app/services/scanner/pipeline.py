@@ -24,6 +24,7 @@ from app.services.risk.engine import calculate_risk_score
 from app.services.risk.danger_engine import evaluate_vulnerability_danger
 from app.services.scanner.nmap_runner import ScanExecutionError, run_nmap_scan
 from app.services.scanner.deep_scanner import run_deep_scan
+from app.services.scanner.vulnerability_upsert import upsert_vulnerability
 
 logger = logging.getLogger("aegis.pipeline")
 
@@ -163,75 +164,47 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             for v_finding in active_verified_findings:
                 cve_id = v_finding["cve_id"]
                 port_num = v_finding.get("port")
-                v_type = v_finding.get("verification", VerificationType.nse_verified.value)
+                v_type_str = v_finding.get("verification", VerificationType.nse_verified.value)
+                try:
+                    ver_enum = VerificationType(v_type_str)
+                except ValueError:
+                    ver_enum = VerificationType.nse_verified
                 cvss_score = float(v_finding.get("cvss_score", 7.5))
                 evidence = v_finding.get("evidence", "")
                 title = v_finding.get("title", cve_id)
                 description = v_finding.get("description", title)
                 severity_enum = v_finding.get("severity", VulnerabilitySeverity.high)
 
-                # Check for existing vulnerability to deduplicate / upgrade
-                dup_query = select(Vulnerability).where(
-                    Vulnerability.asset_id == asset.id,
-                    Vulnerability.cve_id == cve_id,
-                    Vulnerability.port == port_num,
-                )
-                dup_result = await db.execute(dup_query)
-                existing_vuln: Optional[Vulnerability] = dup_result.scalar_one_or_none()
-
                 danger_meta = evaluate_vulnerability_danger(
                     cve_id=cve_id,
                     cvss_score=cvss_score,
-                    verification=v_type,
+                    verification=ver_enum.value,
                     title=title,
                     description=description,
                 )
 
-                risk_score = calculate_risk_score(cvss_score, asset.criticality)
-
-                if existing_vuln:
-                    # Upgrade verification level and update evidence/danger
-                    existing_vuln.verification = VerificationType(v_type)
-                    existing_vuln.evidence = evidence
-                    existing_vuln.danger_score = danger_meta["danger_score"]
-                    existing_vuln.exploitability = danger_meta["exploitability"]
-                    existing_vuln.impact = danger_meta["impact"]
-                    existing_vuln.public_exploit = danger_meta["public_exploit"]
-                    existing_vuln.risk_score = risk_score
-                    existing_vuln.last_seen_at = now_utc
-                    existing_vuln.scan_id = scan.id
-                    if existing_vuln.status == VulnerabilityStatus.mitigated:
-                        existing_vuln.status = VulnerabilityStatus.open
-                else:
-                    new_vuln = Vulnerability(
-                        scan_id=scan.id,
-                        asset_id=asset.id,
-                        cve_id=cve_id,
-                        title=title[:255],
-                        description=description,
-                        cvss_score=cvss_score,
-                        severity=severity_enum,
-                        port=port_num,
-                        service=None,
-                        service_version=None,
-                        risk_score=risk_score,
-                        epss_score=None,
-                        status=VulnerabilityStatus.open,
-                        remediation=v_finding.get("remediation") or "Apply official security patch or mitigation playbook immediately.",
-                        verification=VerificationType(v_type),
-                        evidence=evidence,
-                        danger_score=danger_meta["danger_score"],
-                        exploitability=danger_meta["exploitability"],
-                        impact=danger_meta["impact"],
-                        public_exploit=danger_meta["public_exploit"],
-                        first_seen_at=now_utc,
-                        last_seen_at=now_utc,
-                    )
-                    db.add(new_vuln)
+                vuln_obj, _ = await upsert_vulnerability(
+                    db=db,
+                    asset_id=asset.id,
+                    cve_id=cve_id,
+                    title=title,
+                    description=description,
+                    cvss_score=cvss_score,
+                    severity=severity_enum,
+                    port=port_num,
+                    service=v_finding.get("service"),
+                    verification=ver_enum,
+                    evidence=evidence,
+                    danger_meta=danger_meta,
+                    scan_id=scan.id,
+                    remediation=v_finding.get("remediation") or "Apply official security patch or mitigation playbook immediately.",
+                    asset_criticality=asset.criticality,
+                )
 
                 await db.commit()
                 total_vulns += 1
-                verification_counts[v_type] = verification_counts.get(v_type, 0) + 1
+                ver_val = vuln_obj.verification.value if hasattr(vuln_obj.verification, "value") else str(vuln_obj.verification)
+                verification_counts[ver_val] = verification_counts.get(ver_val, 0) + 1
 
             # 2. Enrich discovered open ports with NVD CVE telemetry (version match)
             for port_info in ports:
@@ -261,15 +234,6 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                     except ValueError:
                         severity_enum = VulnerabilitySeverity.none
 
-                    # Deduplication check
-                    dup_query = select(Vulnerability).where(
-                        Vulnerability.asset_id == asset.id,
-                        Vulnerability.cve_id == cve_id,
-                        Vulnerability.port == port_num,
-                    )
-                    dup_result = await db.execute(dup_query)
-                    existing_vuln = dup_result.scalar_one_or_none()
-
                     danger_meta = evaluate_vulnerability_danger(
                         cve_id=cve_id,
                         cvss_score=cvss_score,
@@ -278,52 +242,29 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                         description=cve.get("description", ""),
                     )
 
-                    risk_score = calculate_risk_score(cvss_score, asset.criticality)
+                    title = f"{cve_id}: {cve['description'][:80]}..." if cve.get("description") else cve_id
+                    vuln_obj, _ = await upsert_vulnerability(
+                        db=db,
+                        asset_id=asset.id,
+                        cve_id=cve_id,
+                        title=title,
+                        description=cve.get("description", "No vulnerability description available."),
+                        cvss_score=cvss_score,
+                        severity=severity_enum,
+                        port=port_num,
+                        service=service or product,
+                        service_version=version,
+                        verification=VerificationType.version_match,
+                        danger_meta=danger_meta,
+                        scan_id=scan.id,
+                        remediation="Review vendor security advisories and update to the latest patched software version.",
+                        asset_criticality=asset.criticality,
+                    )
 
-                    if existing_vuln:
-                        # If existing finding was version match, update danger fields
-                        if existing_vuln.verification == VerificationType.version_match:
-                            existing_vuln.danger_score = danger_meta["danger_score"]
-                            existing_vuln.exploitability = danger_meta["exploitability"]
-                            existing_vuln.impact = danger_meta["impact"]
-                            existing_vuln.public_exploit = danger_meta["public_exploit"]
-                        existing_vuln.last_seen_at = now_utc
-                        existing_vuln.scan_id = scan.id
-                        await db.commit()
-                        total_vulns += 1
-                        verification_counts[existing_vuln.verification.value] = (
-                            verification_counts.get(existing_vuln.verification.value, 0) + 1
-                        )
-                    else:
-                        title = f"{cve_id}: {cve['description'][:80]}..." if cve.get("description") else cve_id
-                        new_vuln = Vulnerability(
-                            scan_id=scan.id,
-                            asset_id=asset.id,
-                            cve_id=cve_id,
-                            title=title[:255],
-                            description=cve.get("description", "No vulnerability description available."),
-                            cvss_score=cvss_score,
-                            severity=severity_enum,
-                            port=port_num,
-                            service=service or product,
-                            service_version=version,
-                            risk_score=risk_score,
-                            epss_score=None,
-                            status=VulnerabilityStatus.open,
-                            remediation="Review vendor security advisories and update to the latest patched software version.",
-                            verification=VerificationType.version_match,
-                            evidence=None,
-                            danger_score=danger_meta["danger_score"],
-                            exploitability=danger_meta["exploitability"],
-                            impact=danger_meta["impact"],
-                            public_exploit=danger_meta["public_exploit"],
-                            first_seen_at=now_utc,
-                            last_seen_at=now_utc,
-                        )
-                        db.add(new_vuln)
-                        await db.commit()
-                        total_vulns += 1
-                        verification_counts["version_match"] += 1
+                    await db.commit()
+                    total_vulns += 1
+                    ver_val = vuln_obj.verification.value if hasattr(vuln_obj.verification, "value") else str(vuln_obj.verification)
+                    verification_counts[ver_val] = verification_counts.get(ver_val, 0) + 1
 
             # 3. Smart Asset Type Detection for auto_created assets
             if getattr(asset, "auto_created", False):

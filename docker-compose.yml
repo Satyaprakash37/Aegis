@@ -41,6 +41,7 @@ services:
       - ./backend/reports:/app/reports
       - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
+      - ./backend/scripts:/app/scripts
 
   frontend:
     build:

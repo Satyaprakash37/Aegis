@@ -2,13 +2,14 @@
 
 import enum
 from typing import TYPE_CHECKING, List, Optional
-from sqlalchemy import Boolean, Enum, Integer, String, Text
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.scan import Scan
+    from app.models.user import User
     from app.models.vulnerability import Vulnerability
 
 
@@ -40,7 +41,7 @@ class Asset(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    ip_address: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    ip_address: Mapped[str] = mapped_column(String(255), unique=False, index=True, nullable=False)
     target_type: Mapped[TargetType] = mapped_column(
         Enum(TargetType, name="target_type_enum", values_callable=lambda obj: [e.value for e in obj]),
         nullable=False,
@@ -59,11 +60,18 @@ class Asset(Base, TimestampMixin):
     )
     criticality: Mapped[int] = mapped_column(Integer, nullable=False)  # Scale 1-5
     owner: Mapped[str] = mapped_column(String(255), nullable=False)
+    owner_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     auto_created: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     is_seed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
     # Relationships
+    owner_user: Mapped[Optional["User"]] = relationship("User", back_populates="assets")
     scans: Mapped[List["Scan"]] = relationship(
         "Scan",
         back_populates="asset",

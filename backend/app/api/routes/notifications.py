@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
+from app.models.asset import Asset
 from app.models.scan import Scan, ScanStatus
 from app.models.user import User
 from app.models.vulnerability import VerificationType, Vulnerability, VulnerabilitySeverity
@@ -31,7 +32,10 @@ async def get_notifications(
     scans_stmt = (
         select(Scan)
         .options(selectinload(Scan.asset))
-        .where(Scan.status == ScanStatus.completed)
+        .where(
+            Scan.created_by == current_user.id,
+            Scan.status == ScanStatus.completed,
+        )
         .order_by(Scan.completed_at.desc())
         .limit(10)
     )
@@ -64,8 +68,12 @@ async def get_notifications(
     # 2. Fetch recent critical vulnerabilities (up to 10)
     crit_vulns_stmt = (
         select(Vulnerability)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
         .options(selectinload(Vulnerability.asset))
-        .where(Vulnerability.severity == VulnerabilitySeverity.critical)
+        .where(
+            Asset.owner_id == current_user.id,
+            Vulnerability.severity == VulnerabilitySeverity.critical,
+        )
         .order_by(Vulnerability.first_seen_at.desc())
         .limit(10)
     )
@@ -89,13 +97,15 @@ async def get_notifications(
     # 3. Fetch recent actively verified vulnerabilities (up to 5)
     ver_vulns_stmt = (
         select(Vulnerability)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
         .options(selectinload(Vulnerability.asset))
         .where(
+            Asset.owner_id == current_user.id,
             Vulnerability.verification.in_([
                 VerificationType.nuclei_verified,
                 VerificationType.nse_verified,
                 VerificationType.ssl_verified,
-            ])
+            ]),
         )
         .order_by(Vulnerability.first_seen_at.desc())
         .limit(5)

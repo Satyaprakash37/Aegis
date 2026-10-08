@@ -50,6 +50,7 @@ class ScanRead(BaseModel):
     total_vulns_found: int = 0
     raw_output: Optional[Dict[str, Any]] = None
     progress: Optional[Dict[str, Any]] = None
+    created_by: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 

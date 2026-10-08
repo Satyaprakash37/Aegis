@@ -28,6 +28,7 @@ class AssetBase(BaseModel):
     resolved_ip: Optional[str] = None
     auto_created: bool = False
     is_seed: bool = False
+    owner_id: Optional[int] = None
 
 
 class AssetCreate(AssetBase):

@@ -98,7 +98,12 @@ async def create_direct_scan(
     elif effective_ip:
         search_conditions.append(Asset.resolved_ip == effective_ip)
 
-    existing_query = await db.execute(select(Asset).where(or_(*search_conditions)))
+    existing_query = await db.execute(
+        select(Asset).where(
+            Asset.owner_id == current_user.id,
+            or_(*search_conditions),
+        )
+    )
     asset = existing_query.scalar_one_or_none()
 
     auto_created = False
@@ -113,7 +118,8 @@ async def create_direct_scan(
             asset_type=AssetType.server,
             environment=AssetEnvironment.production,
             criticality=3,
-            owner="Auto-Discovered",
+            owner=current_user.full_name or current_user.email or "Auto-Discovered",
+            owner_id=current_user.id,
             description=f"Auto-registered target created via direct scan on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}.",
             auto_created=True,
             is_seed=False,
@@ -162,6 +168,7 @@ async def create_direct_scan(
         started_at=datetime.now(timezone.utc),
         total_vulns_found=0,
         raw_output=None,
+        created_by=current_user.id,
     )
     db.add(new_scan)
     await db.commit()
@@ -192,8 +199,13 @@ async def create_scan(
     current_user: Annotated[User, Depends(require_analyst_or_admin)],
 ) -> ScanRead:
     """Trigger a new vulnerability scan in the background. Requires analyst or admin role."""
-    # Verify asset existence
-    asset_query = await db.execute(select(Asset).where(Asset.id == scan_in.asset_id))
+    # Verify asset existence and ownership
+    asset_query = await db.execute(
+        select(Asset).where(
+            Asset.id == scan_in.asset_id,
+            or_(Asset.owner_id == current_user.id, Asset.is_seed == True),
+        )
+    )
     asset = asset_query.scalar_one_or_none()
     if not asset:
         raise HTTPException(
@@ -240,6 +252,7 @@ async def create_scan(
         started_at=datetime.now(timezone.utc),
         total_vulns_found=0,
         raw_output=None,
+        created_by=current_user.id,
     )
     db.add(new_scan)
     await db.commit()
@@ -261,6 +274,7 @@ async def create_scan(
         completed_at=None,
         total_vulns_found=0,
         raw_output=None,
+        created_by=new_scan.created_by,
     )
 
 
@@ -274,8 +288,13 @@ async def list_scans(
     status_filter: Optional[ScanStatus] = Query(None, alias="status", description="Filter by status"),
 ) -> ScanListResponse:
     """List historical and active scans with pagination and asset metadata."""
-    query = select(Scan).options(selectinload(Scan.asset)).order_by(Scan.id.desc())
-    count_query = select(func.count(Scan.id))
+    query = (
+        select(Scan)
+        .options(selectinload(Scan.asset))
+        .where(Scan.created_by == current_user.id)
+        .order_by(Scan.id.desc())
+    )
+    count_query = select(func.count(Scan.id)).where(Scan.created_by == current_user.id)
 
     if asset_id:
         query = query.where(Scan.asset_id == asset_id)
@@ -308,6 +327,7 @@ async def list_scans(
                 total_vulns_found=s.total_vulns_found,
                 raw_output=s.raw_output,
                 progress=s.progress,
+                created_by=s.created_by,
             )
         )
 
@@ -326,7 +346,7 @@ async def get_scan(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ScanDetailRead:
     """Retrieve full details of a specific scan including vulnerability severity breakdown."""
-    query = select(Scan).options(selectinload(Scan.asset)).where(Scan.id == id)
+    query = select(Scan).options(selectinload(Scan.asset)).where(Scan.id == id, Scan.created_by == current_user.id)
     scan = (await db.execute(query)).scalar_one_or_none()
 
     if not scan:
@@ -382,6 +402,7 @@ async def get_scan(
         total_vulns_found=scan.total_vulns_found,
         raw_output=scan.raw_output,
         progress=scan.progress,
+        created_by=scan.created_by,
         vuln_counts=vuln_counts,
         verification_breakdown=verification_breakdown,
     )
@@ -394,8 +415,8 @@ async def get_scan_vulnerabilities(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> List[VulnerabilityRead]:
     """Retrieve all vulnerability findings associated with a specific scan."""
-    # Verify scan exists
-    scan_query = select(Scan).options(selectinload(Scan.asset)).where(Scan.id == id)
+    # Verify scan exists and belongs to current user
+    scan_query = select(Scan).options(selectinload(Scan.asset)).where(Scan.id == id, Scan.created_by == current_user.id)
     scan = (await db.execute(scan_query)).scalar_one_or_none()
     if not scan:
         raise HTTPException(

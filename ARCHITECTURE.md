@@ -46,7 +46,7 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 ### `assets`
 - `id` (PK, UUID / Integer)
 - `name` (String)
-- `ip_address` (String(255), Unique, Indexed - target IP address or domain name)
+- `ip_address` (String(255), Indexed, Non-unique - target IP address or domain name; scoped by `owner_id`)
 - `target_type` (Enum: `ip`, `domain`, default `ip`)
 - `resolved_ip` (String(45), Nullable - auto-resolved IPv4 for domain targets)
 - `hostname` (String, Nullable)
@@ -54,6 +54,9 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 - `environment` (Enum: `production`, `staging`, `dev`)
 - `criticality` (Integer, 1 to 5)
 - `owner` (String)
+- `owner_id` (FK -> `users.id`, Nullable, Indexed - per-user asset ownership isolation)
+- `is_seed` (Boolean, default `False` - shared system demo targets visible across tenants)
+- `auto_created` (Boolean, default `False` - flag for direct scan auto-registered targets)
 - `description` (Text, Nullable)
 - `created_at` (Timestamp with timezone)
 - `updated_at` (Timestamp with timezone)
@@ -68,6 +71,7 @@ AEGIS is an enterprise-ready continuous vulnerability management platform. Organ
 - `total_vulns_found` (Integer, default 0)
 - `raw_output` (JSONB)
 - `progress` (JSONB, Nullable - live progress tracking `current_stage`, `stage_number`, `stages_total`, `detail`, `hosts_processed`, `hosts_total`, `updated_at`)
+- `created_by` (FK -> `users.id`, Nullable, Indexed - initiator user identity for multi-tenant isolation)
 
 ### `vulnerabilities`
 - `id` (PK, UUID / Integer)
@@ -369,6 +373,36 @@ Professional external scanning must unmask virtual hosts and backend services ob
     - *Anti-WAF Tuning*: Tuned Nuclei to `-rl 25` and `-concurrency 15`; parses WAF signatures (`BitNinja`, `Cloudflare`, `ModSecurity`, `Incapsula`) into reconnaissance telemetry.
   - **Issue 3: Port Coverage Expansion**:
     - Expanded Deep Recon port scanning from top 500 ports to top 1000 ports plus critical infrastructure port list (`21,22,23,25,53,80,110,111,135,139,143,443,445,465,587,993,995,1433,1521,2049,3306,3389,5432,5900,6379,8080,8443,8888,9090,27017,61616`).
+
+- **Phase 8.7: Multi-Tenancy Data Isolation, Data Integrity Cleanup & UI Theme Refresh**:
+  - **Workstream A: Per-User Multi-Tenant Data Isolation**:
+    - *Database Schema Migration (`006_phase8_7_multi_tenancy.py`)*:
+      - Added `owner_id` (FK to `users.id`, nullable for seed assets) to `assets` table.
+      - Dropped unique constraint on `assets.ip_address` and created non-unique index `ix_assets_ip_address` to allow distinct owners to scan shared targets (e.g. `172.20.0.5` or demo targets) without collision.
+      - Added `created_by` (FK to `users.id`) to `scans` table.
+      - Backfilled all existing legacy assets and scans to the primary administrative user (`admin@aegis.internal`, ID 1).
+    - *API Layer Scoping*:
+      - `assets.py`: List filters by `(Asset.owner_id == current_user.id) | (Asset.is_seed == True)`. Target registration assigns `owner_id = current_user.id`. Duplicate target checks are scoped strictly per owner. Detail, update, and delete enforce ownership and return 404 for unowned assets.
+      - `scans.py`: Direct scan launch searches and auto-creates assets strictly scoped to `owner_id = current_user.id`. Scans assign `created_by = current_user.id`. Scans list, detail, and scan vulnerability endpoints filter by `Scan.created_by == current_user.id`.
+      - `vulns.py`: Joins `Asset` on `Vulnerability.asset_id == Asset.id` and scopes by `Asset.owner_id == current_user.id`. Detail, verification status update, and mitigation status update strictly verify asset ownership.
+      - `dashboard.py`: Summary metrics, severity breakdown, 7-day scan activity trends, top risky assets, dangerous vulnerabilities, and recent vulnerabilities scoped by `current_user.id`.
+      - `notifications.py`: Scans scoped by `Scan.created_by == current_user.id`, vulnerabilities joined and scoped by `Asset.owner_id == current_user.id`.
+      - `reports.py`: Scoped by `Report.generated_by == current_user.id`.
+    - *Seed vs. User Assets*: Seed assets (`is_seed=True`) are shared demo reference points visible to all users. When a non-admin user scans a seed asset or direct IP, the platform isolates their scan and vulnerability findings to their own tenant context.
+  - **Workstream B: Deduplication & Legacy False Positive Elimination**:
+    - *Unified Vulnerability Upsert Service (`vulnerability_upsert.py`)*:
+      - Centralized vulnerability deduplication across all scanner pipelines (`pipeline.py`, `deep_scanner.py`, `seed.py`).
+      - Identifies matches on `(asset_id, cve_id, port)`. Upgrades verification rank monotonically (`nuclei_verified` > `ssl_verified` > `nse_verified` > `version_match`). Merges raw proof and evidence, recalculates contextual risk scores dynamically, and preserves user-assigned mitigation status.
+    - *Database Deduplication Cleanup Script (`dedup_cleanup.py`)*:
+      - Merged all existing historical duplicate vulnerabilities on identical `(asset_id, cve_id, port)`, pruning 8 duplicate records and keeping highest verification rank records.
+    - *OpenSSH Temporal Guards & False Positive Reclassification (`false_positive_cleanup.py`)*:
+      - Augmented `nvd_client.py` with OpenSSH branch temporal launch barriers (`9.x: 2022`, `8.x: 2019`, `7.x: 2015`, `6.6: 2014`, `6.x: 2012`, `5.x: 2008`) and generic mail/submission false positive guards (`CVE-2001-1573`, `CVE-2004-2248`, `CVE-1999-0661`, `CVE-2000-0525`).
+      - Audited and updated 39 legacy false positives in the database to `status="false_positive"`.
+  - **Workstream C: UI Polish, Theme Refresh & Navigation**:
+    - *Deep Navy Theme Refresh*: Redesigned visual design system to deep navy palette (`#0b1220` base, `#0a0f1c` dark sidebar, `#111a2e` card elevations, with subtle `border-white/5` borders) across Tailwind config, styles, sidebar, topbar, cards, login, and registration.
+    - *Reports Page Navigation*: Added prominent Back navigation button on `/reports` page allowing quick return to dashboard or previous views.
+    - *Zero-State Handling*: First-time / new tenants see clean, empty states with zero console errors or broken counters.
+    - *Full Automated E2E Verification*: Playwright tests confirmed 0 console errors across all pages, authenticated multi-tenant isolation between Admin and Analyst accounts, and full visual harmony.
 
 ---
 

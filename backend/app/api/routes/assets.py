@@ -42,7 +42,7 @@ async def create_asset(
     effective_ip = resolution["ip"]
     target_type = TargetType.domain if resolution["type"] == "domain" else TargetType.ip
 
-    # Check for duplicate IP or domain target
+    # Check for duplicate IP or domain target for current user
     duplicate_conditions = [
         Asset.ip_address == cleaned_target,
         Asset.resolved_ip == cleaned_target,
@@ -54,7 +54,10 @@ async def create_asset(
         ])
 
     existing_query = await db.execute(
-        select(Asset).where(or_(*duplicate_conditions))
+        select(Asset).where(
+            Asset.owner_id == current_user.id,
+            or_(*duplicate_conditions),
+        )
     )
     existing_asset = existing_query.scalar_one_or_none()
     if existing_asset is not None:
@@ -75,7 +78,8 @@ async def create_asset(
         asset_type=asset_in.asset_type,
         environment=asset_in.environment,
         criticality=asset_in.criticality,
-        owner=asset_in.owner or "Unassigned",
+        owner=asset_in.owner or current_user.full_name or current_user.email,
+        owner_id=current_user.id,
         description=asset_in.description,
     )
     db.add(db_asset)
@@ -97,9 +101,9 @@ async def list_assets(
     sort_by: Optional[str] = Query("created_at", description="Field to sort by: name, criticality, created_at, ip_address"),
     order: Optional[str] = Query("desc", description="Sort direction: asc or desc"),
 ) -> AssetListResponse:
-    """List network assets with searching, filtering, sorting, and pagination."""
-    query = select(Asset)
-    count_query = select(func.count(Asset.id))
+    access_filter = or_(Asset.owner_id == current_user.id, Asset.is_seed == True)
+    query = select(Asset).where(access_filter)
+    count_query = select(func.count(Asset.id)).where(access_filter)
 
     # Apply search filter
     if search:
@@ -158,7 +162,12 @@ async def get_asset(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AssetDetailRead:
     """Retrieve detailed information for a specific asset including vulnerability counts."""
-    query = await db.execute(select(Asset).where(Asset.id == id))
+    query = await db.execute(
+        select(Asset).where(
+            Asset.id == id,
+            or_(Asset.owner_id == current_user.id, Asset.is_seed == True),
+        )
+    )
     asset = query.scalar_one_or_none()
 
     if not asset:
@@ -187,6 +196,7 @@ async def get_asset(
         environment=asset.environment,
         criticality=asset.criticality,
         owner=asset.owner,
+        owner_id=asset.owner_id,
         description=asset.description,
         auto_created=asset.auto_created,
         is_seed=asset.is_seed,
@@ -203,8 +213,13 @@ async def update_asset(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_analyst_or_admin)],
 ) -> Asset:
-    """Update an existing asset. Requires analyst or admin role."""
-    query = await db.execute(select(Asset).where(Asset.id == id))
+    """Update an existing asset. Requires analyst or admin role and asset ownership."""
+    query = await db.execute(
+        select(Asset).where(
+            Asset.id == id,
+            Asset.owner_id == current_user.id,
+        )
+    )
     asset = query.scalar_one_or_none()
 
     if not asset:
@@ -240,6 +255,7 @@ async def update_asset(
 
             duplicate_query = await db.execute(
                 select(Asset).where(
+                    Asset.owner_id == current_user.id,
                     or_(*duplicate_conditions),
                     Asset.id != id,
                 )
@@ -305,10 +321,16 @@ async def clear_demo_data(
 async def delete_asset(
     id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
+    current_user: Annotated[User, Depends(require_analyst_or_admin)],
 ) -> dict:
-    """Delete an asset. Admin privileges strictly required."""
-    query = await db.execute(select(Asset).where(Asset.id == id))
+    """Delete an asset. Must be owned by current user (or admin)."""
+    stmt = select(Asset).where(Asset.id == id)
+    if current_user.role == "admin":
+        stmt = stmt.where(or_(Asset.owner_id == current_user.id, Asset.is_seed == False))
+    else:
+        stmt = stmt.where(Asset.owner_id == current_user.id)
+
+    query = await db.execute(stmt)
     asset = query.scalar_one_or_none()
 
     if not asset:

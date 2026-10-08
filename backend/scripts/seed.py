@@ -23,6 +23,7 @@ from app.models.vulnerability import (
 from app.core.security import hash_password
 from app.services.risk.engine import calculate_risk_score
 from app.services.risk.danger_engine import evaluate_vulnerability_danger
+from app.services.scanner.vulnerability_upsert import upsert_vulnerability
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("aegis.seed")
@@ -165,7 +166,7 @@ async def seed_database():
             if existing_ip:
                 created_assets[a_spec["name"]] = existing_ip
             else:
-                asset = Asset(**a_spec, is_seed=True)
+                asset = Asset(**a_spec, is_seed=True, owner_id=None)
                 session.add(asset)
                 await session.flush()
                 created_assets[a_spec["name"]] = asset
@@ -224,7 +225,7 @@ async def seed_database():
 
         created_scans: List[Scan] = []
         for s_spec in scans_spec:
-            scan = Scan(**s_spec)
+            scan = Scan(**s_spec, created_by=admin_user.id)
             session.add(scan)
             await session.flush()
             created_scans.append(scan)
@@ -548,16 +549,15 @@ async def seed_database():
                 description=v_item["description"],
             )
 
-            vuln = Vulnerability(
+            await upsert_vulnerability(
+                session=session,
                 asset_id=target_asset.id,
                 scan_id=v_item["scan_id"],
                 cve_id=v_item["cve_id"],
                 title=v_item["title"],
                 description=v_item["description"],
                 cvss_score=v_item["cvss_score"],
-                risk_score=risk_val,
                 severity=v_item["severity"],
-                status=v_item["status"],
                 port=v_item["port"],
                 service=v_item["service"],
                 service_version=v_item["service_version"],
@@ -568,10 +568,8 @@ async def seed_database():
                 exploitability=danger_meta["exploitability"],
                 impact=danger_meta["impact"],
                 public_exploit=danger_meta["public_exploit"],
-                first_seen_at=first_seen,
-                last_seen_at=first_seen,
+                status=v_item["status"],
             )
-            session.add(vuln)
 
         # Backfill any existing vulnerabilities in DB that lack danger metrics
         all_existing = (await session.execute(select(Vulnerability))).scalars().all()

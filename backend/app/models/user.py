@@ -9,7 +9,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.asset import Asset
     from app.models.report import Report
+    from app.models.scan import Scan
 
 
 class UserRole(str, enum.Enum):
@@ -41,6 +43,16 @@ class User(Base):
     )
 
     # Relationships
+    assets: Mapped[List["Asset"]] = relationship(
+        "Asset",
+        back_populates="owner_user",
+        foreign_keys="Asset.owner_id",
+    )
+    scans: Mapped[List["Scan"]] = relationship(
+        "Scan",
+        back_populates="creator_user",
+        foreign_keys="Scan.created_by",
+    )
     reports: Mapped[List["Report"]] = relationship(
         "Report",
         back_populates="user",

@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List
 from fastapi import APIRouter, Depends
-from sqlalchemy import case, func, select, literal_column, text
+from sqlalchemy import case, func, select, literal_column, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,17 +31,32 @@ async def get_dashboard_summary(
     """Retrieve top-level operational cybersecurity KPI metrics."""
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
-    # Asset count
-    total_assets = (await db.execute(select(func.count(Asset.id)))).scalar_one()
+    # Asset count (owned assets + shared seed demo assets)
+    total_assets = (
+        await db.execute(
+            select(func.count(Asset.id)).where(
+                or_(Asset.owner_id == current_user.id, Asset.is_seed == True)
+            )
+        )
+    ).scalar_one()
 
-    # Total vulns
-    total_vulns = (await db.execute(select(func.count(Vulnerability.id)))).scalar_one()
+    # Total vulns (only owned assets)
+    total_vulns = (
+        await db.execute(
+            select(func.count(Vulnerability.id))
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(Asset.owner_id == current_user.id)
+        )
+    ).scalar_one()
 
     # Open vulns
     open_vulns = (
         await db.execute(
-            select(func.count(Vulnerability.id)).where(
-                Vulnerability.status == VulnerabilityStatus.open
+            select(func.count(Vulnerability.id))
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(
+                Asset.owner_id == current_user.id,
+                Vulnerability.status == VulnerabilityStatus.open,
             )
         )
     ).scalar_one()
@@ -49,8 +64,11 @@ async def get_dashboard_summary(
     # Mitigated vulns
     mitigated_vulns = (
         await db.execute(
-            select(func.count(Vulnerability.id)).where(
-                Vulnerability.status == VulnerabilityStatus.mitigated
+            select(func.count(Vulnerability.id))
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(
+                Asset.owner_id == current_user.id,
+                Vulnerability.status == VulnerabilityStatus.mitigated,
             )
         )
     ).scalar_one()
@@ -58,7 +76,10 @@ async def get_dashboard_summary(
     # Critical + High open count
     crit_high_count = (
         await db.execute(
-            select(func.count(Vulnerability.id)).where(
+            select(func.count(Vulnerability.id))
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(
+                Asset.owner_id == current_user.id,
                 Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
                 Vulnerability.severity.in_([VulnerabilitySeverity.critical, VulnerabilitySeverity.high]),
             )
@@ -68,7 +89,10 @@ async def get_dashboard_summary(
     # Verified Dangerous Vulns (danger_score > 6 + verified active)
     verified_dangerous_count = (
         await db.execute(
-            select(func.count(Vulnerability.id)).where(
+            select(func.count(Vulnerability.id))
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(
+                Asset.owner_id == current_user.id,
                 Vulnerability.danger_score > 6.0,
                 Vulnerability.verification.in_([
                     VerificationType.nse_verified,
@@ -83,7 +107,10 @@ async def get_dashboard_summary(
     # Scans run in last 30 days
     scans_30d = (
         await db.execute(
-            select(func.count(Scan.id)).where(Scan.started_at >= thirty_days_ago)
+            select(func.count(Scan.id)).where(
+                Scan.created_by == current_user.id,
+                Scan.started_at >= thirty_days_ago,
+            )
         )
     ).scalar_one()
 
@@ -109,6 +136,8 @@ async def get_severity_distribution(
     """Retrieve vulnerability breakdown by CVSS severity classification for donut charts."""
     counts_query = (
         select(Vulnerability.severity, func.count(Vulnerability.id))
+        .join(Asset, Vulnerability.asset_id == Asset.id)
+        .where(Asset.owner_id == current_user.id)
         .group_by(Vulnerability.severity)
     )
     result = await db.execute(counts_query)
@@ -152,7 +181,11 @@ async def get_vulnerability_trend(
             day_col,
             func.count(Vulnerability.id).label("count"),
         )
-        .where(Vulnerability.first_seen_at >= start_date)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
+        .where(
+            Asset.owner_id == current_user.id,
+            Vulnerability.first_seen_at >= start_date,
+        )
         .group_by(day_col)
         .order_by(day_col)
     )
@@ -215,6 +248,7 @@ async def get_top_risky_assets(
             func.count(Vulnerability.id).label("total_vulns"),
         )
         .join(Vulnerability, Vulnerability.asset_id == Asset.id, isouter=True)
+        .where(Asset.owner_id == current_user.id)
         .group_by(Asset.id, Asset.name, Asset.ip_address, Asset.criticality)
         .order_by(
             (
@@ -273,8 +307,10 @@ async def get_top_dangerous_vulnerabilities(
     """Retrieve top 5 most dangerous active vulnerabilities ranked by danger_score."""
     query = (
         select(Vulnerability)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
         .options(selectinload(Vulnerability.asset))
         .where(
+            Asset.owner_id == current_user.id,
             Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
             Vulnerability.danger_score.isnot(None),
         )
@@ -315,7 +351,9 @@ async def get_recent_vulnerabilities(
     """Retrieve the latest 8 vulnerability discoveries for live activity monitoring."""
     query = (
         select(Vulnerability)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
         .options(selectinload(Vulnerability.asset))
+        .where(Asset.owner_id == current_user.id)
         .order_by(Vulnerability.first_seen_at.desc(), Vulnerability.id.desc())
         .limit(8)
     )

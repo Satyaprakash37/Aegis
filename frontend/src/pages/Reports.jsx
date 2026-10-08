@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
+  ArrowLeft,
   FileText, 
   FileSpreadsheet, 
   Layers, 
@@ -20,6 +22,7 @@ import { ReportTypeBadge, ReportFormatBadge } from '../components/Badge';
 
 export default function Reports() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -179,18 +182,28 @@ export default function Reports() {
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-white tracking-wide font-sans">
-              Security Reports & Compliance Export
-            </h1>
-            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-              PDF & Excel Engine
-            </span>
+        <div className="flex items-center gap-3.5">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700/60 bg-slate-800/80 hover:bg-slate-750 hover:border-cyan-500/40 text-slate-300 hover:text-white text-xs font-mono transition-all shadow-sm cursor-pointer shrink-0"
+            title="Go back"
+          >
+            <ArrowLeft className="w-4 h-4 text-cyan-400" />
+            <span>Back</span>
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-white tracking-wide font-sans">
+                Security Reports & Compliance Export
+              </h1>
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                PDF & Excel Engine
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1 font-sans">
+              Generate executive briefings, technical vulnerability audits, and regulatory compliance spreadsheets
+            </p>
           </div>
-          <p className="text-xs text-slate-400 mt-1 font-sans">
-            Generate executive briefings, technical vulnerability audits, and regulatory compliance spreadsheets
-          </p>
         </div>
 
         <div className="flex items-center gap-2">

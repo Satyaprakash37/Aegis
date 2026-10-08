@@ -101,6 +101,7 @@ async def list_reports(
     stmt = (
         select(Report)
         .options(selectinload(Report.user))
+        .where(Report.generated_by == current_user.id)
         .order_by(Report.created_at.desc())
     )
     result = await db.execute(stmt)
@@ -137,7 +138,7 @@ async def download_report(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Stream report file with clean attachment content-disposition."""
-    stmt = select(Report).where(Report.id == report_id)
+    stmt = select(Report).where(Report.id == report_id, Report.generated_by == current_user.id)
     result = await db.execute(stmt)
     report = result.scalar_one_or_none()
 
