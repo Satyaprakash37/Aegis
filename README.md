@@ -69,11 +69,11 @@ Dark SOC theme with JWT role-based access control, account lockout protection, a
 
 ## Core Capabilities
 
-- **Real-World Web Reconnaissance Engine & Live Progress Reporting (Phase 8.3):**
-  - **Stage 1 (Subdomain Discovery):** Automated passive OSINT subdomain enumeration using ProjectDiscovery `subfinder v2.16` (up to 100 subdomains).
+- **Real-World Web Reconnaissance Engine & Live Progress Reporting (Phase 8.3 & Phase 8.10):**
+  - **Stage 1 (Redundant Multi-Method Subdomain Discovery - Phase 8.10):** High-reliability layered subdomain enumeration combining (1) ProjectDiscovery `subfinder` with `-all` and 1-minute time budgeting, (2) Certificate Transparency log queries (`crt.sh`) with auto-retry and `HackerTarget` secondary passive fallback, and (3) concurrent active DNS infrastructure brute-forcing across 23 enterprise prefixes (`www`, `mail`, `crm`, `campusone`, `vpn`, etc.). Outputs deduplicated multi-method telemetry (`subfinder: X, crt.sh: Y, brute: Z → total N`).
   - **Stage 2 (Live Web Probing & Tech Detection):** High-speed multi-threaded probing with ProjectDiscovery `httpx v1.12` extracting status codes, page titles, CDN edge detection, and software stacks.
-  - **Stage 3 (CDN-Aware Smart Port & NSE Scanning):** CDN IPs scanned light (top 100 ports); true origin IPs scanned deep (top 500 ports + Nmap NSE `vuln` scripts).
-  - **Stage 4 (Expanded Nuclei Dynamic Web Exploitation):** Probes live discovered virtual hosts with Nuclei v3 for active CVEs, exposures, and misconfigurations.
+  - **Stage 3 (CDN-Aware Smart Port & NSE Scanning):** CDN IPs scanned light (top 100 ports); true origin IPs scanned deep (top 1000 ports + Nmap NSE `vuln` scripts with privilege-aware firewall evasion).
+  - **Stage 4 (Expanded Nuclei Dynamic Web Exploitation):** Probes live discovered virtual hosts with Nuclei v3 for active CVEs, exposures, and misconfigurations in parallel batches.
   - **Stage 5 (SSL/TLS Cryptographic Audit):** Evaluates cipher strength, deprecated protocols (TLS 1.0/1.1), missing HSTS headers, Heartbleed, ROBOT, and cert validity via `testssl.sh`, tagging findings with purple `SSL Audit ✓` badges.
   - **Stage 6 (Software Stack Version Advisories):** Cross-references discovered web runtime versions (WordPress, Apache, PHP, nginx, Gunicorn) against known advisories.
   - **Stage 7 (Dossier Aggregation & Prioritization):** Stores full reconnaissance profile in `raw_output.recon` and deduplicates findings.
@@ -236,6 +236,19 @@ git clone https://github.com/Satyaprakash37/aegis.git
 cd aegis
 cp .env.example .env
 ```
+
+#### Deeper Subdomain Discovery with Free API Keys (Optional)
+While AEGIS operates completely autonomously out of the box using subfinder, Certificate Transparency log mining, and active DNS infrastructure probing without requiring any API keys, you can optionally unlock deeper passive feeds by configuring free community API keys in your `.env`:
+
+```env
+# VirusTotal Free API Key (500 req/day free tier)
+SUBFINDER_VIRUSTOTAL_KEY="your_virustotal_api_key_here"
+
+# SecurityTrails Free API Key (50 req/month free tier)
+SUBFINDER_SECURITYTRAILS_KEY="your_securitytrails_api_key_here"
+```
+
+When provided, the backend dynamically provisions `/home/appuser/.config/subfinder/provider-config.yaml` at runtime, enabling authenticated passive queries while maintaining graceful fallbacks.
 
 ### 2. Launch Entire Platform
 ```bash

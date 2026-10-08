@@ -11,17 +11,22 @@ Implements the 7-stage professional web reconnaissance and active verification e
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
+import urllib.request
+import urllib.error
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import nmap
 
+from app.core.config import settings
 from app.models.vulnerability import VulnerabilitySeverity, VerificationType
 from app.services.scanner.nmap_runner import (
     ScanExecutionError,
@@ -151,35 +156,202 @@ TECH_VULN_CATALOG: List[Dict[str, Any]] = [
 ]
 
 
-def _run_stage1_subdomains(domain: str) -> List[str]:
-    """Stage 1: Subdomain Discovery using subfinder."""
-    subfinder_bin = shutil.which("subfinder") or "/usr/local/bin/subfinder"
-    clean_domain = domain.split(":")[0].strip().lower()
-    discovered: Set[str] = {clean_domain}
+COMMON_DNS_PREFIXES: List[str] = [
+    "www", "mail", "webmail", "ftp", "smtp", "ns1", "ns2", "vpn",
+    "api", "dev", "test", "staging", "portal", "erp", "crm", "admin",
+    "cpanel", "webdisk", "autodiscover", "autoconfig", "campusone",
+    "admission", "moodle", "app"
+]
 
+
+def _ensure_subfinder_config() -> Optional[str]:
+    """Write ~/.config/subfinder/provider-config.yaml if API keys are configured."""
+    vt_key = getattr(settings, "SUBFINDER_VIRUSTOTAL_KEY", "").strip()
+    st_key = getattr(settings, "SUBFINDER_SECURITYTRAILS_KEY", "").strip()
+    if not vt_key and not st_key:
+        return None
+
+    config_dir = os.path.expanduser("~/.config/subfinder")
+    try:
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "provider-config.yaml")
+        lines = []
+        if vt_key:
+            lines.append("virustotal:")
+            lines.append(f"  - {vt_key}")
+        if st_key:
+            lines.append("securitytrails:")
+            lines.append(f"  - {st_key}")
+        with open(config_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        return config_path
+    except Exception as e:
+        logger.warning(f"[STAGE 1] Failed to write subfinder provider config: {e}")
+        return None
+
+
+def _run_subfinder_discovery(clean_domain: str) -> Set[str]:
+    """Method 1: Subfinder discovery with -all, -max-time 1, -timeout 15 and retry logic."""
+    subfinder_bin = shutil.which("subfinder") or "/usr/local/bin/subfinder"
     if not os.path.exists(subfinder_bin):
         logger.warning(f"[STAGE 1] subfinder binary not found at '{subfinder_bin}'. Skipping.")
-        return list(discovered)
+        return set()
 
-    cmd = [subfinder_bin, "-d", clean_domain, "-silent", "-all", "-timeout", "30"]
-    logger.info(f"[STAGE 1] Invoking subfinder: {' '.join(cmd)}")
+    cfg_path = _ensure_subfinder_config()
+    cmd = [
+        subfinder_bin,
+        "-d", clean_domain,
+        "-silent",
+        "-all",
+        "-max-time", "1",
+        "-timeout", "15",
+    ]
+    if cfg_path and os.path.exists(cfg_path):
+        cmd.extend(["-pc", cfg_path])
+
+    for attempt in range(2):
+        results: Set[str] = set()
+        try:
+            logger.info(f"[STAGE 1] Invoking subfinder (attempt {attempt + 1}): {' '.join(cmd)}")
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            for line in proc.stdout.splitlines():
+                sub = line.strip().lower()
+                if sub and (sub.endswith("." + clean_domain) or sub == clean_domain):
+                    results.add(sub)
+            if results or attempt == 1:
+                return results
+        except Exception as e:
+            logger.warning(f"[STAGE 1] subfinder attempt {attempt + 1} error on {clean_domain}: {e}")
+            if attempt == 0:
+                time.sleep(5)
+    return set()
+
+
+def _run_crtsh_discovery(clean_domain: str) -> Set[str]:
+    """Method 2: Certificate Transparency discovery via crt.sh with retry and HackerTarget fallback."""
+    results: Set[str] = set()
+    crt_url = f"https://crt.sh/?q=%25.{clean_domain}&output=json"
+
+    # Attempt crt.sh with 1 retry
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(
+                crt_url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                    for entry in data:
+                        name_val = entry.get("name_value", "")
+                        for line in name_val.split("\n"):
+                            sub = line.strip().lower()
+                            if sub.startswith("*."):
+                                sub = sub[2:]
+                            if sub and (sub.endswith("." + clean_domain) or sub == clean_domain):
+                                results.add(sub)
+                    if results:
+                        logger.info(f"[STAGE 1] crt.sh discovered {len(results)} subdomains on attempt {attempt + 1}")
+                        return results
+        except Exception as e:
+            logger.warning(f"[STAGE 1] crt.sh attempt {attempt + 1} failed for {clean_domain}: {e}")
+            if attempt == 0:
+                time.sleep(5)
+
+    # Secondary CT / passive fallback: HackerTarget hostsearch
+    ht_url = f"https://api.hackertarget.com/hostsearch/?q={clean_domain}"
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        for line in proc.stdout.splitlines():
-            sub = line.strip().lower()
-            if sub and "." in sub:
-                discovered.add(sub)
+        logger.info(f"[STAGE 1] Invoking secondary CT/passive fallback (HackerTarget) for {clean_domain}")
+        req = urllib.request.Request(
+            ht_url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            content = resp.read().decode("utf-8", errors="ignore")
+            for line in content.splitlines():
+                line = line.strip()
+                if line and "," in line:
+                    sub = line.split(",")[0].strip().lower()
+                    if sub and (sub.endswith("." + clean_domain) or sub == clean_domain):
+                        results.add(sub)
+        logger.info(f"[STAGE 1] Secondary passive source discovered {len(results)} subdomains for {clean_domain}")
     except Exception as e:
-        logger.error(f"[STAGE 1] subfinder execution error on {clean_domain}: {e}")
+        logger.warning(f"[STAGE 1] Secondary passive source failed for {clean_domain}: {e}")
 
-    # Safety cap: max 100 subdomains
-    result_list = sorted(list(discovered))
+    return results
+
+
+def _run_dns_brute_discovery(clean_domain: str) -> Set[str]:
+    """Method 3: Active DNS brute-force discovery for common infrastructure prefixes."""
+    discovered: Set[str] = set()
+
+    def _resolve_prefix(prefix: str) -> Optional[str]:
+        candidate = f"{prefix}.{clean_domain}"
+        try:
+            socket.gethostbyname(candidate)
+            return candidate
+        except Exception:
+            return None
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(_resolve_prefix, p) for p in COMMON_DNS_PREFIXES]
+            for f in concurrent.futures.as_completed(futures):
+                try:
+                    res = f.result()
+                    if res:
+                        discovered.add(res)
+                except Exception:
+                    pass
+        logger.info(f"[STAGE 1] DNS brute-force discovered {len(discovered)} subdomains for {clean_domain}")
+    except Exception as e:
+        logger.warning(f"[STAGE 1] DNS brute-force error on {clean_domain}: {e}")
+
+    return discovered
+
+
+def _run_stage1_subdomains(domain: str) -> Tuple[List[str], Dict[str, Any]]:
+    """Stage 1: Multi-method layered subdomain discovery (Subfinder + CT Logs + DNS Brute)."""
+    clean_domain = domain.split(":")[0].strip().lower()
+
+    # 1. Run Subfinder
+    subfinder_subs = _run_subfinder_discovery(clean_domain)
+
+    # 2. Run CT Logs (crt.sh / HackerTarget fallback)
+    crtsh_subs = _run_crtsh_discovery(clean_domain)
+
+    # 3. Run DNS Brute-force
+    brute_subs = _run_dns_brute_discovery(clean_domain)
+
+    # Union all results + ensure apex domain is present
+    all_discovered = subfinder_subs | crtsh_subs | brute_subs | {clean_domain}
+    total_found = len(all_discovered)
+
+    summary_str = f"subfinder: {len(subfinder_subs)}, crt.sh: {len(crtsh_subs)}, brute: {len(brute_subs)} → total {total_found}"
+    logger.info(f"[STAGE 1] Layered subdomain discovery complete: {summary_str}")
+
+    discovery_note = None
+    if total_found <= 1:
+        discovery_note = (
+            "Limited subdomains discovered (<=1). Consider adding API keys in settings or "
+            "verifying target is not a single-host deployment."
+        )
+
+    result_list = sorted(list(all_discovered))
     if len(result_list) > 100:
         logger.info(f"[STAGE 1] Capping discovered subdomains from {len(result_list)} to 100")
         result_list = result_list[:100]
 
-    logger.info(f"[STAGE 1] Subdomain discovery complete: {len(result_list)} subdomains found")
-    return result_list
+    stats = {
+        "subfinder_count": len(subfinder_subs),
+        "crtsh_count": len(crtsh_subs),
+        "dns_brute_count": len(brute_subs),
+        "total": total_found,
+        "summary": summary_str,
+        "discovery_note": discovery_note,
+    }
+
+    return result_list, stats
 
 
 def _run_stage2_live_probing(
@@ -307,10 +479,11 @@ def _run_stage3_port_scan_single_ip(
 
     try:
         # CDN IPs scanned light (top 100), real origin IPs scanned deep (top 1000 + critical port coverage)
+        frag_flag = "-f " if (hasattr(os, "geteuid") and os.geteuid() == 0) else ""
         port_args = (
             "-sT -sV -Pn --top-ports 100 -T4 --version-intensity 7 --host-timeout 3m"
             if is_cdn
-            else f"-sT -sV -Pn -p 1-1000,{CRITICAL_PORTS} -T4 -f --data-length 24 --version-intensity 7 --script-timeout 30s --host-timeout 5m"
+            else f"-sT -sV -Pn -p 1-1000,{CRITICAL_PORTS} -T4 {frag_flag}--data-length 24 --version-intensity 7 --script-timeout 30s --host-timeout 5m"
         )
         logger.info(f"[STAGE 3] Port scanning {ip} (is_cdn={is_cdn}, args='{port_args}')")
         nm.scan(hosts=ip, arguments=port_args)
@@ -343,7 +516,7 @@ def _run_stage3_port_scan_single_ip(
         if not is_cdn and open_ports:
             port_spec = ",".join(str(p["port"]) for p in open_ports[:15])
             nse_args = (
-                f"-sT -sV -Pn --script vuln -p {port_spec} -T4 -f --data-length 24 "
+                f"-sT -sV -Pn --script vuln -p {port_spec} -T4 {frag_flag}--data-length 24 "
                 f"--version-intensity 7 --host-timeout 5m --script-timeout 30s"
             )
             logger.info(f"[STAGE 3] Executing Nmap NSE scripts on {ip}:{port_spec}")
@@ -538,8 +711,16 @@ def _parse_testssl_records(
         cve_field = item.get("cve", "")
         port = int(item.get("port", 443)) if str(item.get("port", "")).isdigit() else 443
 
+        finding_lower = finding_text.lower()
+
+        # Ignore OK/INFO severity unless explicitly actionable
+        if sev in ("OK", "INFO"):
+            continue
+
         # 1. Deprecated TLS 1.0 or TLS 1.1
-        if test_id in ("TLS1", "TLS1_1") and ("offered" in finding_text.lower() or sev in ("LOW", "MEDIUM", "WARN")):
+        if test_id in ("TLS1", "TLS1_1") and ("offered" in finding_lower or sev in ("LOW", "MEDIUM", "WARN")):
+            if "not offered" in finding_lower:
+                continue
             proto_name = "TLS 1.0" if test_id == "TLS1" else "TLS 1.1"
             cve_id = f"SSL-{test_id}-DEPRECATED"
             if cve_id not in seen_keys:
@@ -557,7 +738,7 @@ def _parse_testssl_records(
                 })
 
         # 2. Missing HSTS Header
-        elif test_id == "HSTS" and "not offered" in finding_text.lower():
+        elif test_id == "HSTS" and "not offered" in finding_lower:
             cve_id = "SSL-MISSING-HSTS"
             if cve_id not in seen_keys:
                 seen_keys.add(cve_id)
@@ -575,8 +756,11 @@ def _parse_testssl_records(
 
         # 3. Known SSL Vulnerabilities
         elif test_id in ("heartbleed", "ROBOT", "poodle_ssl", "LOGJAM", "BEAST", "SWEET32", "FREAK", "DROWN"):
-            if sev in ("LOW", "MEDIUM", "HIGH", "CRITICAL", "WARN") or "vulnerable" in finding_text.lower():
-                vuln_cve = cve_field or {
+            if "not vulnerable" in finding_lower or "not affected" in finding_lower:
+                continue
+            if sev in ("LOW", "MEDIUM", "HIGH", "CRITICAL", "WARN") or "vulnerable" in finding_lower:
+                first_cve = cve_field.split()[0].strip() if cve_field else ""
+                vuln_cve = first_cve or {
                     "heartbleed": "CVE-2014-0160",
                     "ROBOT": "CVE-2017-13099",
                     "poodle_ssl": "CVE-2014-3566",
@@ -586,6 +770,7 @@ def _parse_testssl_records(
                     "FREAK": "CVE-2015-0204",
                     "DROWN": "CVE-2016-0800",
                 }.get(test_id, f"SSL-{test_id.upper()}")
+                vuln_cve = vuln_cve[:49]
 
                 if vuln_cve not in seen_keys:
                     seen_keys.add(vuln_cve)
@@ -604,7 +789,9 @@ def _parse_testssl_records(
                     })
 
         # 4. Weak / Broken Cipher Suites
-        elif test_id in ("null_ciphers", "rc4", "des_ciphers", "weak_ciphers") and ("offered" in finding_text.lower() or sev in ("LOW", "MEDIUM", "HIGH", "WARN")):
+        elif test_id in ("null_ciphers", "rc4", "des_ciphers", "weak_ciphers") and ("offered" in finding_lower or sev in ("LOW", "MEDIUM", "HIGH", "WARN")):
+            if "not offered" in finding_lower:
+                continue
             cve_id = f"SSL-WEAK-CIPHER-{test_id.upper()}"
             if cve_id not in seen_keys:
                 seen_keys.add(cve_id)
@@ -622,7 +809,7 @@ def _parse_testssl_records(
 
         # 5. Certificate Lifecycle Anomaly
         elif test_id in ("cert_expiration_status", "cert_self_signed", "cert_common_name_mismatch"):
-            if sev in ("LOW", "MEDIUM", "HIGH", "WARN") or any(k in finding_text.lower() for k in ["expired", "self signed", "mismatch"]):
+            if sev in ("LOW", "MEDIUM", "HIGH", "WARN"):
                 cve_id = f"SSL-CERT-{test_id.upper().replace('_', '-')}"
                 if cve_id not in seen_keys:
                     seen_keys.add(cve_id)
@@ -767,11 +954,23 @@ async def run_deep_scan(
     # -------------------------------------------------------------
     if is_domain:
         await report_progress(1, "subdomain_discovery", f"Searching for subdomains of {root_domain}...")
-        subdomains = await asyncio.to_thread(_run_stage1_subdomains, root_domain)
-        await report_progress(1, "subdomain_discovery", f"Discovered {len(subdomains)} subdomains for {root_domain}")
+        subdomains, stage1_stats = await asyncio.to_thread(_run_stage1_subdomains, root_domain)
+        await report_progress(
+            1,
+            "subdomain_discovery",
+            f"Discovered {len(subdomains)} subdomains ({stage1_stats['summary']})"
+        )
     else:
         await report_progress(1, "subdomain_discovery", "Target is IP address - skipping subdomain discovery")
         subdomains = [target]
+        stage1_stats = {
+            "subfinder_count": 0,
+            "crtsh_count": 0,
+            "dns_brute_count": 0,
+            "total": 1,
+            "summary": "N/A (target is IP)",
+            "discovery_note": None,
+        }
 
     # -------------------------------------------------------------
     # STAGE 2: Live Web Probing & Tech Stack Detection
@@ -975,6 +1174,11 @@ async def run_deep_scan(
         "subdomains_count": len(subdomains),
         "subdomains_found": len(subdomains),
         "subdomains": subdomains[:50],
+        "subfinder_count": stage1_stats.get("subfinder_count", 0),
+        "crtsh_count": stage1_stats.get("crtsh_count", 0),
+        "dns_brute_count": stage1_stats.get("dns_brute_count", 0),
+        "discovery_methods_summary": stage1_stats.get("summary", ""),
+        "discovery_note": stage1_stats.get("discovery_note"),
         "live_hosts": live_hosts[:25],
         "live_hosts_count": len(live_hosts),
         "live_hosts_found": len(live_hosts),

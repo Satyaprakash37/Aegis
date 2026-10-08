@@ -235,17 +235,17 @@ def _execute_nmap_sync(ip_address: str, scan_type: str) -> List[Dict[str, Any]]:
     is_quick = "quick" in scan_type_str
 
     # Build scan command variations for initial attempt and stealth retry
-    # Attempt 1: Standard high-speed scan
+    frag_flag = "-f " if (hasattr(os, "geteuid") and os.geteuid() == 0) else ""
     if is_quick:
         args_attempt1 = "-sT -sV -Pn --top-ports 100 -T4 --version-intensity 7 --host-timeout 5m"
         args_attempt2 = "-sT -sV -Pn --top-ports 100 -T3 --disable-arp-ping --version-intensity 7 --host-timeout 5m"
     else:
         args_attempt1 = (
-            f"-sT -sV -Pn -p 1-1000,{CRITICAL_PORTS} -T4 -f --data-length 24 "
+            f"-sT -sV -Pn -p 1-1000,{CRITICAL_PORTS} -T4 {frag_flag}--data-length 24 "
             f"--version-intensity 7 --script-timeout 30s --host-timeout 6m"
         )
         args_attempt2 = (
-            f"-sT -sV -Pn -p 1-1000,{CRITICAL_PORTS} -T2 --disable-arp-ping -f --data-length 24 "
+            f"-sT -sV -Pn -p 1-1000,{CRITICAL_PORTS} -T2 --disable-arp-ping {frag_flag}--data-length 24 "
             f"--version-intensity 7 --script-timeout 30s --host-timeout 8m"
         )
 

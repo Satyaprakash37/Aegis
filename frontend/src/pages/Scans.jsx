@@ -1064,6 +1064,11 @@ export default function Scans() {
                           <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">
                             {scanDetails.raw_output.recon.live_hosts_found || 0} Live Targets Probed
                           </span>
+                          {scanDetails.raw_output.recon.discovery_methods_summary && (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-indigo-950/60 text-indigo-300 border border-indigo-800/40" title="Subdomain discovery method breakdown">
+                              {scanDetails.raw_output.recon.discovery_methods_summary}
+                            </span>
+                          )}
                           {scanDetails.raw_output.recon.cdn_detected ? (
                             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950/60 text-amber-300 border border-amber-800/40 flex items-center gap-1">
                               <AlertTriangle className="w-3 h-3 text-amber-400" />
@@ -1076,6 +1081,17 @@ export default function Scans() {
                           )}
                         </div>
                       </div>
+
+                      {/* Discovery Note banner if present */}
+                      {scanDetails.raw_output.recon.discovery_note && (
+                        <div className="p-3 rounded-lg bg-blue-950/20 border border-blue-800/40 text-xs font-sans text-blue-200 flex items-start gap-2.5">
+                          <AlertCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold font-mono text-blue-300">Discovery Notice: </span>
+                            {scanDetails.raw_output.recon.discovery_note}
+                          </div>
+                        </div>
+                      )}
 
                       {/* CDN Warning banner if detected */}
                       {scanDetails.raw_output.recon.cdn_detected && (

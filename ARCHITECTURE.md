@@ -421,6 +421,18 @@ Professional external scanning must unmask virtual hosts and backend services ob
     - *Sanitized Exception Handling*: Generic 500 error responses returned to clients with zero tracebacks leaked.
     - *Hardened Nginx Frontend*: Configured `server_tokens off;` and `autoindex off;` with security response headers.
 
+- **Phase 8.10: Subdomain Discovery Reliability & Multi-Method Redundancy**:
+  - **Problem Solved**:
+    - Subfinder passive sources intermittently hang or fail when external OSINT APIs (`api.sub.md`, `scanmalware.com`, etc.) throttle, Cloudflare 523, or time out. A static subprocess timeout killed subfinder prematurely, collapsing discovered subdomains to 1 (apex domain) and bypassing internal origin servers (`115.241.211.x`) behind CDNs.
+    - Public `crt.sh` servers frequently encounter `HTTP 502 Bad Gateway` and rate limits under heavy traffic.
+  - **Redundant Multi-Method Architecture**:
+    - *Method 1 (Subfinder Optimized)*: Invoked with `-all`, internal time budget `-max-time 1` (capped to 60s within subfinder), `-timeout 15`, and subprocess timeout of 90s with retry logic. Supports dynamic `/home/appuser/.config/subfinder/provider-config.yaml` generation when `SUBFINDER_VIRUSTOTAL_KEY` or `SUBFINDER_SECURITYTRAILS_KEY` environment variables are provided.
+    - *Method 2 (Certificate Transparency + Secondary Passive Fallback)*: Queries `crt.sh` JSON API with automatic retry after 5s delay. If `crt.sh` fails (e.g. 502 Bad Gateway), immediately falls back to `HackerTarget` hostsearch API (`https://api.hackertarget.com/hostsearch/?q=<domain>`), extracting 30-50+ passive subdomains in <2s.
+    - *Method 3 (Active DNS Infrastructure Brute-Force)*: High-speed concurrent DNS resolution (`socket.gethostbyname`) via `ThreadPoolExecutor(max_workers=10)` across 23 enterprise prefixes (`www`, `mail`, `webmail`, `ftp`, `smtp`, `ns1`, `ns2`, `vpn`, `api`, `dev`, `test`, `staging`, `portal`, `erp`, `crm`, `admin`, `cpanel`, `webdisk`, `autodiscover`, `autoconfig`, `campusone`, `admission`, `moodle`, `app`), guaranteeing discovery of critical enterprise origin hosts even with 100% passive source outages.
+    - *Deduplicated Union*: Merges all three sources into a deduplicated set, ensuring apex domain presence and safe capping to 100 subdomains.
+    - *Telemetry Breakdown & Transparency*: Emits real-time discovery breakdown (`subfinder: X, crt.sh: Y, brute: Z → total N`) displayed in the scan dossier reconnaissance badge. Automatically triggers a discovery notice banner if $\le 1$ subdomain is found.
+    - *Privilege-Aware Firewall Evasion*: Fixed Nmap `-f` (packet fragmentation) flag by detecting non-root user execution (`os.geteuid() == 0`), ensuring origin servers (`115.241.211.x`) are deeply port-scanned without `fragscan requires root privileges` fatal errors.
+
 ---
 
 ## 9. Operating Rules

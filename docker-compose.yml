@@ -34,6 +34,8 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/aegis}
       - SECRET_KEY=${SECRET_KEY:-tt7pxPBH6vBi5h43PuoZiU4RajuKFqEXBPHc_4TCXCOvTxvC488kembI2TlWENTr}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      - SUBFINDER_VIRUSTOTAL_KEY=${SUBFINDER_VIRUSTOTAL_KEY:-}
+      - SUBFINDER_SECURITYTRAILS_KEY=${SUBFINDER_SECURITYTRAILS_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

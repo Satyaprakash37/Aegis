@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     NVD_API_KEY: Union[str, None] = ""
     ENABLE_SSRF_PROTECTION: bool = False
     BLOCK_METADATA_IPS: bool = True
+    SUBFINDER_VIRUSTOTAL_KEY: str = ""
+    SUBFINDER_SECURITYTRAILS_KEY: str = ""
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
