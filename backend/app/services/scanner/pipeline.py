@@ -4,6 +4,7 @@ Coordinates the Nmap port scanning engine, NSE vulnerability scripts, Nuclei act
 verification, NVD API enrichment, danger assessment, deduplication, and database persistence.
 """
 
+import asyncio
 from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, List, Optional
@@ -66,6 +67,8 @@ async def execute_scan_pipeline(scan_id: int) -> None:
             scan.started_at = datetime.now(timezone.utc)
             await db.commit()
 
+            progress_lock = asyncio.Lock()
+
             async def update_progress(
                 current_stage: str,
                 stage_number: int,
@@ -74,16 +77,20 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                 hosts_processed: int = 0,
                 hosts_total: int = 0,
             ):
-                scan.progress = {
-                    "current_stage": current_stage,
-                    "stage_number": stage_number,
-                    "stages_total": stages_total,
-                    "detail": detail,
-                    "hosts_processed": hosts_processed,
-                    "hosts_total": hosts_total,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
-                await db.commit()
+                async with progress_lock:
+                    try:
+                        scan.progress = {
+                            "current_stage": current_stage,
+                            "stage_number": stage_number,
+                            "stages_total": stages_total,
+                            "detail": detail,
+                            "hosts_processed": hosts_processed,
+                            "hosts_total": hosts_total,
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        await db.commit()
+                    except Exception as pe:
+                        logger.warning(f"Error persisting scan progress update: {pe}")
 
             is_deep = scan.scan_type == ScanType.deep or scan.scan_type.value == "deep"
             stage_names = (

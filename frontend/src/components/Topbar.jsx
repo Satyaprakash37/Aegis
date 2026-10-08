@@ -74,13 +74,25 @@ export default function Topbar() {
     fetchHealth();
     fetchNotifications();
 
-    // Poll every 20 seconds for live updates
+    const handleScanEvent = () => {
+      fetchHealth();
+      fetchNotifications();
+    };
+
+    window.addEventListener('aegis:scan-completed', handleScanEvent);
+    window.addEventListener('aegis:scan-started', handleScanEvent);
+
+    // Poll every 10 seconds for live updates (5s if an active scan is detected)
     const interval = setInterval(() => {
       fetchHealth();
       fetchNotifications();
-    }, 20000);
+    }, 10000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('aegis:scan-completed', handleScanEvent);
+      window.removeEventListener('aegis:scan-started', handleScanEvent);
+    };
   }, [fetchHealth, fetchNotifications]);
 
   // Mark all read handler

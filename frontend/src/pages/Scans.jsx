@@ -54,8 +54,14 @@ export default function Scans() {
   const [total, setTotal] = useState(0);
   const pageSize = 10;
 
-  // Track if polling is active
+  // Track if polling is active and active scan IDs
   const pollIntervalRef = useRef(null);
+  const runningScanIdsRef = useRef(new Set());
+  const isPollingInFlightRef = useRef(false);
+  const pollingStartRef = useRef(null);
+
+  // Recently completed/failed scans to show green transition banner
+  const [recentlyCompletedScans, setRecentlyCompletedScans] = useState([]);
 
   // Live elapsed timer state (ticks every second when there are active scans)
   const [nowTimestamp, setNowTimestamp] = useState(Date.now());
@@ -134,19 +140,74 @@ export default function Scans() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Fetch scans list
+  // Fetch scans list & synchronize running/terminal states
   const fetchScans = useCallback(async (isPolling = false) => {
-    if (!isPolling) setLoading(true);
+    if (isPolling) {
+      if (isPollingInFlightRef.current) return;
+      isPollingInFlightRef.current = true;
+    } else {
+      setLoading(true);
+    }
+
     try {
       const res = await api.get('/api/scans', {
         params: { page, page_size: pageSize }
       });
-      setScans(res.data.data || []);
-      setTotal(res.data.total || 0);
+      const newScans = res.data.data || [];
+      const newTotal = res.data.total || 0;
 
-      // If a scan detail is open, keep it in sync
-      if (selectedScanIdRef.current) {
-        const updated = (res.data.data || []).find(s => s.id === selectedScanIdRef.current);
+      // Identify terminal state transitions
+      const previouslyRunning = runningScanIdsRef.current;
+      const newlyFinished = [];
+
+      newScans.forEach((s) => {
+        if (previouslyRunning.has(s.id) && (s.status === 'completed' || s.status === 'failed')) {
+          newlyFinished.push(s);
+        }
+      });
+
+      // Update set of currently active/running scan IDs
+      const currentRunning = new Set(
+        newScans.filter((s) => s.status === 'running' || s.status === 'pending').map((s) => s.id)
+      );
+      runningScanIdsRef.current = currentRunning;
+
+      setScans(newScans);
+      setTotal(newTotal);
+
+      // Handle newly finished scans
+      if (newlyFinished.length > 0) {
+        newlyFinished.forEach((finished) => {
+          // Add to recently completed scans list for green banner transition
+          setRecentlyCompletedScans((prev) => [
+            ...prev.filter((item) => item.id !== finished.id),
+            finished,
+          ]);
+
+          // Automatically clear finished scan from banner after 8 seconds
+          setTimeout(() => {
+            setRecentlyCompletedScans((prev) => prev.filter((item) => item.id !== finished.id));
+          }, 8000);
+
+          // Force-refresh modal/dossier if user currently has this scan open
+          if (selectedScanIdRef.current === finished.id) {
+            api.get(`/api/scans/${finished.id}`)
+              .then((dRes) => {
+                setScanDetails(dRes.data);
+                setSelectedScan(dRes.data);
+              })
+              .catch((err) => console.error('Failed to refresh finished scan dossier:', err));
+          }
+
+          // Broadcast global event to update Topbar health & notifications badge
+          window.dispatchEvent(new CustomEvent('aegis:scan-completed', { detail: finished }));
+        });
+
+        // Refresh registered assets to synchronize vulnerability counts
+        fetchAssets();
+      } else if (selectedScanIdRef.current) {
+        // Keep selectedScan in sync with ongoing progress
+        const updated = newScans.find((s) => s.id === selectedScanIdRef.current);
         if (updated) {
           setSelectedScan(updated);
         }
@@ -154,9 +215,15 @@ export default function Scans() {
     } catch (err) {
       if (!isPolling) {
         showToast(err.response?.data?.detail || 'Failed to fetch scan telemetry', 'error');
+      } else {
+        console.warn('Transient scan polling error (will retry next interval):', err.message || err);
       }
     } finally {
-      if (!isPolling) setLoading(false);
+      if (isPolling) {
+        isPollingInFlightRef.current = false;
+      } else {
+        setLoading(false);
+      }
     }
   }, [page, pageSize]);
 
@@ -169,19 +236,34 @@ export default function Scans() {
     fetchScans();
   }, [fetchScans]);
 
-  // Live polling for running/pending scans every 3 seconds
+  // Live polling for running/pending scans every 3 seconds (max 1 hour)
   useEffect(() => {
     const hasActiveScans = scans.some(
       (s) => s.status === 'running' || s.status === 'pending'
     );
 
     if (hasActiveScans) {
+      if (!pollingStartRef.current) {
+        pollingStartRef.current = Date.now();
+      }
+
+      // Max 1 hour safety timeout
+      if (Date.now() - pollingStartRef.current > 3600000) {
+        console.warn('Max polling duration (1 hour) exceeded. Stopping automatic interval.');
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        return;
+      }
+
       if (!pollIntervalRef.current) {
         pollIntervalRef.current = setInterval(() => {
           fetchScans(true);
         }, 3000);
       }
     } else {
+      pollingStartRef.current = null;
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
@@ -230,6 +312,11 @@ export default function Scans() {
         });
         const targetLabel = res.data.target || res.data.asset_name || trimmedTarget;
         showToast(`Scan launched on ${targetLabel}`);
+        if (res.data.scan_id) {
+          runningScanIdsRef.current.add(res.data.scan_id);
+          pollingStartRef.current = Date.now();
+          window.dispatchEvent(new CustomEvent('aegis:scan-started', { detail: res.data }));
+        }
       } else {
         const payload = {
           asset_id: parseInt(selectedAssetId, 10),
@@ -237,9 +324,15 @@ export default function Scans() {
         };
         const res = await api.post('/api/scans', payload);
         showToast(`Scan initiated on ${res.data.asset_name || 'asset'}`);
+        if (res.data.id) {
+          runningScanIdsRef.current.add(res.data.id);
+          pollingStartRef.current = Date.now();
+          window.dispatchEvent(new CustomEvent('aegis:scan-started', { detail: res.data }));
+        }
       }
-      fetchScans();
-      fetchAssets();
+      setTargetInput('');
+      await fetchScans();
+      await fetchAssets();
     } catch (err) {
       showToast(err.response?.data?.detail || 'Failed to launch scan pipeline', 'error');
     } finally {
@@ -274,8 +367,12 @@ export default function Scans() {
     return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
   };
 
-  // Find currently active running scan if any
+  // Find currently active running scans and recently finished scans
   const runningScans = scans.filter((s) => s.status === 'running' || s.status === 'pending');
+  const bannerScans = [
+    ...runningScans,
+    ...recentlyCompletedScans.filter((rc) => !runningScans.some((rs) => rs.id === rc.id)),
+  ];
 
   return (
     <div className="space-y-6">
@@ -306,49 +403,120 @@ export default function Scans() {
         </button>
       </div>
 
-      {/* LIVE PROGRESS BANNER (Visible during active execution) */}
-      {runningScans.length > 0 && (
-        <div className="p-4 rounded-xl border border-cyan-500/40 bg-gradient-to-r from-slate-950 via-cyan-950/20 to-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.15)] space-y-3">
-          {runningScans.map((rScan) => {
+      {/* LIVE PROGRESS & RECENT COMPLETION BANNER */}
+      {bannerScans.length > 0 && (
+        <div className="space-y-3">
+          {bannerScans.map((rScan) => {
+            const isCompleted = rScan.status === 'completed';
+            const isFailed = rScan.status === 'failed';
+            const isFinished = isCompleted || isFailed;
+
             const prog = rScan.progress || {};
-            const stageNum = prog.stage_number || 1;
+            const stageNum = isFinished
+              ? (prog.stages_total || (rScan.scan_type === 'deep' ? 7 : 3))
+              : (prog.stage_number || 1);
             const totalStages = prog.stages_total || (rScan.scan_type === 'deep' ? 7 : 3);
-            const pct = Math.min(100, Math.max(5, Math.round((stageNum / totalStages) * 100)));
-            const stageLabel = prog.current_stage || (rScan.status === 'pending' ? 'Queued / Initializing' : 'Executing Scan Probes');
-            const detailText = prog.detail || 'Initializing engine processes...';
-            const elapsed = formatElapsed(rScan.started_at);
+            const pct = isFinished ? 100 : Math.min(100, Math.max(5, Math.round((stageNum / totalStages) * 100)));
+            const stageLabel = isCompleted
+              ? 'Scan Completed'
+              : isFailed
+              ? 'Scan Aborted'
+              : (prog.current_stage || (rScan.status === 'pending' ? 'Queued / Initializing' : 'Executing Scan Probes'));
+            const detailText = isCompleted
+              ? `Scan pipeline finished successfully: ${rScan.total_vulns_found} finding(s) detected.`
+              : isFailed
+              ? (prog.detail || 'Scan aborted due to target reachability or execution error.')
+              : (prog.detail || 'Initializing engine processes...');
+
+            // Freeze elapsed timer on completed_at when scan completes
+            const elapsed = formatElapsed(rScan.started_at, isFinished ? rScan.completed_at : null);
 
             return (
-              <div key={rScan.id} className="space-y-2">
+              <div
+                key={rScan.id}
+                className={`p-4 rounded-xl border transition-all duration-500 space-y-3 ${
+                  isCompleted
+                    ? 'border-emerald-500/50 bg-gradient-to-r from-slate-950 via-emerald-950/25 to-slate-950 shadow-[0_0_25px_rgba(16,185,129,0.2)]'
+                    : isFailed
+                    ? 'border-rose-500/50 bg-gradient-to-r from-slate-950 via-rose-950/25 to-slate-950 shadow-[0_0_25px_rgba(244,63,94,0.2)]'
+                    : 'border-cyan-500/40 bg-gradient-to-r from-slate-950 via-cyan-950/20 to-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.15)]'
+                }`}
+              >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2.5">
-                    <span className="relative flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
-                    </span>
+                    {isCompleted ? (
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      </span>
+                    ) : isFailed ? (
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500/20 text-rose-400">
+                        <XCircle className="w-4 h-4 text-rose-400" />
+                      </span>
+                    ) : (
+                      <span className="relative flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                      </span>
+                    )}
                     <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                      Live Scan #{rScan.id}: {rScan.asset_name}
+                      {isCompleted ? 'Scan Completed' : isFailed ? 'Scan Failed' : 'Live Scan'} #{rScan.id}: {rScan.asset_name}
                     </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                        isCompleted
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                          : isFailed
+                          ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                          : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                      }`}
+                    >
                       {rScan.scan_type.toUpperCase()}
                     </span>
+                    {isCompleted && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold animate-pulse">
+                        FINISHED
+                      </span>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-4 text-xs font-mono text-slate-300">
+                  <div className="flex items-center gap-3 text-xs font-mono text-slate-300">
                     <div className="flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
-                      <span>{elapsed} elapsed</span>
+                      <Clock className={`w-3.5 h-3.5 ${isCompleted ? 'text-emerald-400' : isFailed ? 'text-rose-400' : 'text-cyan-400 animate-spin'}`} />
+                      <span>{elapsed} duration</span>
                     </div>
-                    <span className="text-cyan-400 font-bold">
-                      Stage {stageNum} of {totalStages} ({pct}%)
+                    <span className={isCompleted ? 'text-emerald-400 font-bold' : isFailed ? 'text-rose-400 font-bold' : 'text-cyan-400 font-bold'}>
+                      {isCompleted ? '100% Complete' : isFailed ? 'Aborted' : `Stage ${stageNum} of ${totalStages} (${pct}%)`}
                     </span>
+                    {isCompleted && (
+                      <button
+                        onClick={() => handleOpenScanDetails(rScan)}
+                        className="px-2.5 py-1 rounded text-[11px] font-mono font-medium bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 transition-colors cursor-pointer"
+                      >
+                        View Dossier
+                      </button>
+                    )}
+                    {isFinished && (
+                      <button
+                        onClick={() => setRecentlyCompletedScans((prev) => prev.filter((item) => item.id !== rScan.id))}
+                        className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Dismiss banner"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 {/* Progress bar */}
                 <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
                   <div
-                    className="h-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-400 transition-all duration-500 rounded-full"
+                    className={`h-full transition-all duration-500 rounded-full ${
+                      isCompleted
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-400 w-full'
+                        : isFailed
+                        ? 'bg-rose-500 w-full'
+                        : 'bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-400'
+                    }`}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
@@ -356,14 +524,20 @@ export default function Scans() {
                 {/* Stage Detail narrative */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] font-mono text-slate-400">
                   <div className="flex items-center gap-2 text-slate-300">
-                    <span className="font-semibold text-cyan-300">[{stageLabel}]</span>
+                    <span className={`font-semibold ${isCompleted ? 'text-emerald-400' : isFailed ? 'text-rose-400' : 'text-cyan-300'}`}>
+                      [{stageLabel}]
+                    </span>
                     <span>{detailText}</span>
                   </div>
-                  {prog.hosts_total > 0 && (
+                  {isCompleted ? (
+                    <span className="text-emerald-400 font-medium">
+                      {rScan.total_vulns_found} Verified Vulnerabilities
+                    </span>
+                  ) : prog.hosts_total > 0 ? (
                     <span className="text-slate-400">
                       Hosts: {prog.hosts_processed || 0} / {prog.hosts_total}
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             );
