@@ -7,8 +7,8 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# Passlib CryptContext for bcrypt hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Passlib CryptContext for bcrypt hashing with cost factor >= 12
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 
 
 def hash_password(password: str) -> str:

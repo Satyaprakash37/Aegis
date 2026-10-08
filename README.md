@@ -265,7 +265,20 @@ docker compose exec backend python -m scripts.seed
 - [ ] **Jira & ServiceNow Integration:** Automated bi-directional ticketing when vulnerabilities exceed Critical risk thresholds.
 - [ ] **EPSS (Exploit Prediction Scoring System):** Factor real-time probability of exploitation in the wild into the composite risk equation.
 - [ ] **SSO / SAML 2.0 Integration:** Okta, Azure AD, and Google Workspace Enterprise SSO.
-- [ ] **Automated Web Application Scanning:** Integrate OWASP ZAP and Nuclei for active application-layer fuzzing.
+---
+
+## Security Architecture & Hardening
+
+AEGIS is built with enterprise defense-in-depth principles mapped against the OWASP Top 10 (2021):
+
+- **Authentication & Credential Security:** Strict password complexity policy ($\ge 12$ characters, upper, lower, digit, special character), rejection of disposable email domains, anti-enumeration registration endpoints, and bcrypt hashing with cost factor $\ge 12$.
+- **Injection Defenses:** 100% SQLAlchemy 2.0 ORM parameterization, strict dynamic query sorting whitelist (`sort_by`/`order` returns 422 if invalid), shell metacharacter rejection on scan targets, and list-based subprocess execution (never `shell=True`).
+- **Access Control & Multi-Tenancy:** Strict per-user asset and scan data isolation. IDOR protected across all entity endpoints (`HTTP 404` returned on unowned resources).
+- **Network & Perimeter Protection:** Cloud metadata SSRF blocking (`169.254.169.254`, `metadata.google.internal`), strict CORS origin controls, and comprehensive HTTP security headers (`Content-Security-Policy`, `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`).
+- **Resource Exhaustion Defense:** Request body size limit middleware (1MB max), login rate limiting (10 req/min per IP with brute-force lockout), and per-user active scan quotas (max 5 concurrent scans).
+- **Safe Reporting:** Path traversal protected file streaming with realpath validation inside authorized `/app/reports` storage directories.
+
+See [SECURITY.md](SECURITY.md) for full OWASP Top 10 control matrix and hardening specifications.
 
 ---
 

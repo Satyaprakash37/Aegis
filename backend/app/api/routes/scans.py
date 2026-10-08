@@ -129,6 +129,19 @@ async def create_direct_scan(
         await db.refresh(asset)
         auto_created = True
 
+    # Check user-level concurrent active scan quota (max 5 per user)
+    user_active_scans_res = await db.execute(
+        select(func.count(Scan.id)).where(
+            Scan.created_by == current_user.id,
+            Scan.status.in_([ScanStatus.pending, ScanStatus.running]),
+        )
+    )
+    if user_active_scans_res.scalar_one() >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Maximum concurrent scan limit exceeded (5 active scans per user). Please wait for active scans to complete.",
+        )
+
     # 4. Prevent duplicate concurrent scans on the same target asset
     active_scan_query = await db.execute(
         select(Scan).where(
@@ -211,6 +224,19 @@ async def create_scan(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Asset with ID {scan_in.asset_id} not found",
+        )
+
+    # Check user-level concurrent active scan quota (max 5 per user)
+    user_active_scans_res = await db.execute(
+        select(func.count(Scan.id)).where(
+            Scan.created_by == current_user.id,
+            Scan.status.in_([ScanStatus.pending, ScanStatus.running]),
+        )
+    )
+    if user_active_scans_res.scalar_one() >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Maximum concurrent scan limit exceeded (5 active scans per user). Please wait for active scans to complete.",
         )
 
     # Prevent duplicate concurrent scans on the same target asset

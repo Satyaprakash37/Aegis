@@ -129,14 +129,26 @@ async def list_assets(
         query = query.where(Asset.criticality == criticality)
         count_query = count_query.where(Asset.criticality == criticality)
 
-    # Sorting
-    sort_column = {
+    # Dynamic sort column whitelist validation
+    allowed_sort_fields = {
         "name": Asset.name,
         "criticality": Asset.criticality,
         "ip_address": Asset.ip_address,
         "created_at": Asset.created_at,
-    }.get(sort_by, Asset.created_at)
+    }
+    if sort_by and sort_by not in allowed_sort_fields:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid sort_by parameter '{sort_by}'. Allowed fields: {', '.join(sorted(allowed_sort_fields.keys()))}",
+        )
 
+    if order and order.lower() not in {"asc", "desc"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid order parameter '{order}'. Allowed values: 'asc', 'desc'",
+        )
+
+    sort_column = allowed_sort_fields.get(sort_by, Asset.created_at)
     order_fn = desc if order and order.lower() == "desc" else asc
     query = query.order_by(order_fn(sort_column))
 

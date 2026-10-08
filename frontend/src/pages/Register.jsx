@@ -7,6 +7,7 @@ export default function Register() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -17,13 +18,27 @@ export default function Register() {
     e.preventDefault();
     setError('');
 
-    if (!fullName.trim() || !email.trim() || !password) {
+    if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
       setError('Please fill in all required fields.');
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must contain at least 8 characters.');
+    if (password.length < 12) {
+      setError('Password must contain at least 12 characters.');
+      return;
+    }
+
+    const hasUpper = /[A-Z]/.test(password);
+    const hasLower = /[a-z]/.test(password);
+    const hasDigit = /\d/.test(password);
+    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?/~`]/.test(password);
+    if (!hasUpper || !hasLower || !hasDigit || !hasSpecial) {
+      setError('Password must include at least 1 uppercase, 1 lowercase, 1 digit, and 1 special symbol.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match. Please verify password confirmation.');
       return;
     }
 
@@ -33,10 +48,14 @@ export default function Register() {
       navigate('/');
     } catch (err) {
       if (err.response) {
-        if (err.response.status === 409) {
-          setError('A user with this email address already exists.');
+        if (err.response.status === 409 || err.response.status === 400) {
+          setError(typeof err.response.data?.detail === 'string' ? err.response.data.detail : 'Registration failed. If you already have an account, please sign in.');
         } else if (err.response.data && err.response.data.detail) {
-          setError(typeof err.response.data.detail === 'string' ? err.response.data.detail : 'Invalid input provided.');
+          if (Array.isArray(err.response.data.detail)) {
+            setError(err.response.data.detail.map(d => d.msg).join(', '));
+          } else {
+            setError(typeof err.response.data.detail === 'string' ? err.response.data.detail : 'Invalid input provided.');
+          }
         } else {
           setError('Failed to create account. Please verify input data.');
         }
@@ -118,16 +137,34 @@ export default function Register() {
 
           <div>
             <label className="block text-xs font-mono font-medium text-slate-300 uppercase tracking-wider mb-2">
-              Password (min 8 characters)
+              Password (min 12 chars, upper, lower, digit, symbol)
             </label>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
               <input
                 type="password"
                 required
-                minLength={8}
+                minLength={12}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all font-sans"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-mono font-medium text-slate-300 uppercase tracking-wider mb-2">
+              Confirm Password
+            </label>
+            <div className="relative">
+              <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+              <input
+                type="password"
+                required
+                minLength={12}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="••••••••••••"
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all font-sans"
               />

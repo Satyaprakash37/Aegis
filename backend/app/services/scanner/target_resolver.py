@@ -17,6 +17,30 @@ HOSTNAME_REGEX = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$"
 )
 
+# Prohibited shell metacharacters for command injection defense
+DANGEROUS_SHELL_CHARS = re.compile(r"[;`$|&><\n\r\t{}()\\\"']")
+
+# Protected cloud metadata endpoints
+CLOUD_METADATA_HOSTS = {"169.254.169.254", "metadata.google.internal", "metadata", "instance-data"}
+
+
+def check_ssrf_safety(ip_str: Optional[str], host_str: Optional[str]) -> Optional[str]:
+    """Verify target does not access cloud metadata endpoints or loopback when protected."""
+    if host_str and host_str.lower() in CLOUD_METADATA_HOSTS:
+        return f"Target '{host_str}' is a protected cloud metadata endpoint and cannot be targeted."
+    if ip_str:
+        try:
+            ip_obj = ipaddress.ip_address(ip_str)
+            if str(ip_obj) == "169.254.169.254" or ip_obj in ipaddress.ip_network("169.254.0.0/16"):
+                return f"Target IP '{ip_str}' is within the link-local/cloud metadata address space and is prohibited."
+            from app.core.config import settings
+            if getattr(settings, "ENABLE_SSRF_PROTECTION", False):
+                if ip_obj.is_loopback:
+                    return f"Target IP '{ip_str}' is a loopback address and blocked by SSRF policy."
+        except ValueError:
+            pass
+    return None
+
 
 def clean_target_string(raw: Optional[str]) -> str:
     """Strip protocol schemes, paths, query parameters, ports, and trailing slashes."""
@@ -64,6 +88,17 @@ def resolve_target(input_string: Optional[str]) -> Dict[str, Any]:
     raw = input_string or ""
     original = raw
 
+    # Strict defense-in-depth: check for prohibited shell metacharacters immediately
+    if DANGEROUS_SHELL_CHARS.search(raw):
+        return {
+            "type": "invalid",
+            "ip": None,
+            "hostname": None,
+            "target": raw.strip(),
+            "original": original,
+            "error": "Target contains prohibited shell metacharacters or command injection sequences.",
+        }
+
     cleaned = clean_target_string(raw)
     if not cleaned:
         return {
@@ -85,6 +120,16 @@ def resolve_target(input_string: Optional[str]) -> Dict[str, Any]:
     if looks_like_ipv4:
         try:
             ip_obj = ipaddress.IPv4Address(cleaned_lower)
+            ssrf_error = check_ssrf_safety(str(ip_obj), None)
+            if ssrf_error:
+                return {
+                    "type": "invalid",
+                    "ip": None,
+                    "hostname": None,
+                    "target": str(ip_obj),
+                    "original": original,
+                    "error": ssrf_error,
+                }
             return {
                 "type": "ip",
                 "ip": str(ip_obj),
@@ -143,6 +188,16 @@ def resolve_target(input_string: Optional[str]) -> Dict[str, Any]:
                 "error": f"Could not resolve domain '{cleaned_lower}': No IPv4 address found",
             }
         resolved_ip = addr_info[0][4][0]
+        ssrf_err = check_ssrf_safety(resolved_ip, cleaned_lower)
+        if ssrf_err:
+            return {
+                "type": "invalid",
+                "ip": None,
+                "hostname": cleaned_lower,
+                "target": cleaned_lower,
+                "original": original,
+                "error": ssrf_err,
+            }
         return {
             "type": "domain",
             "ip": resolved_ip,

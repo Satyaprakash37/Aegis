@@ -59,9 +59,11 @@ async def create_report(
             db=db,
         )
     except Exception as e:
+        import logging
+        logging.getLogger("aegis.reports").error("Failed to generate report: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate report: {str(e)}",
+            detail="Failed to generate report due to an internal server error. Please try again later.",
         )
 
     # Persist report audit record
@@ -148,7 +150,22 @@ async def download_report(
             detail=f"Report #{report_id} not found.",
         )
 
-    if not os.path.exists(report.file_path):
+    # Path traversal protection: canonicalize and verify path stays within allowed directory
+    canonical_file_path = os.path.realpath(report.file_path)
+    reports_dir = os.path.realpath(os.getenv("REPORTS_DIR", "/app/reports"))
+    local_fallback = os.path.realpath(
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+            "reports",
+        )
+    )
+    allowed_dirs = [reports_dir, local_fallback]
+
+    is_allowed = any(
+        canonical_file_path.startswith(d + os.sep) or canonical_file_path == d
+        for d in allowed_dirs
+    )
+    if not is_allowed or not os.path.exists(canonical_file_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Report file on disk was not found for report #{report_id}.",

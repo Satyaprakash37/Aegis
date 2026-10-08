@@ -402,7 +402,24 @@ Professional external scanning must unmask virtual hosts and backend services ob
     - *Deep Navy Theme Refresh*: Redesigned visual design system to deep navy palette (`#0b1220` base, `#0a0f1c` dark sidebar, `#111a2e` card elevations, with subtle `border-white/5` borders) across Tailwind config, styles, sidebar, topbar, cards, login, and registration.
     - *Reports Page Navigation*: Added prominent Back navigation button on `/reports` page allowing quick return to dashboard or previous views.
     - *Zero-State Handling*: First-time / new tenants see clean, empty states with zero console errors or broken counters.
-    - *Full Automated E2E Verification*: Playwright tests confirmed 0 console errors across all pages, authenticated multi-tenant isolation between Admin and Analyst accounts, and full visual harmony.
+- **Phase 8.9: Comprehensive Security Hardening Audit & Defense-in-Depth Release**:
+  - **Authentication & Credential Hardening**:
+    - *Password Complexity Policy*: Enforced minimum 12 characters (max 128) with required uppercase, lowercase, numeric, and special character combinations. Rejects common guessable dictionary patterns (`password`, `qwerty`, `admin123`, `123456`) and username substrings.
+    - *Email Sanitization & Normalization*: Lowercase and whitespace normalized with RFC compliance via `EmailStr`. Blocklist enforced across ~20 disposable mail domains (`tempmail`, `10minutemail`, `guerrillamail`, `mailinator`, etc.).
+    - *Registration Anti-Enumeration*: Returns generic failure response on duplicate email attempts without confirming account existence. Added Confirm Password validation in UI.
+    - *Cryptographic Hashing & JWT Integrity*: Explicitly configured bcrypt cost factor to 12 (`bcrypt__rounds=12`). JWT signed with 256-bit+ secure secret with minimal payload `{"sub": user_id, "exp": timestamp}`. Lifespan startup asserts `SECRET_KEY` length $\ge 32$ characters and rejects default development secrets.
+  - **Injection & Input Validation Defenses**:
+    - *Dynamic Sort Column Whitelist*: Strict validation of `sort_by` and `order` query parameters on `/api/assets` and `/api/vulns`, rejecting arbitrary column expressions or SQL fragments with `HTTP 422 Unprocessable Entity`.
+    - *Command Injection Target Defenses*: Target validation rejects shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`, `\n`, `\r`, `<`, `>`, `\`, quotes) before any subprocess invocation. Subprocesses strictly invoke list-based arguments (never `shell=True`).
+    - *SSRF & Cloud Metadata Protection*: Explicitly prohibits targeting AWS/GCP cloud metadata IP `169.254.169.254` or hostnames (`metadata.google.internal`), with configurable `ENABLE_SSRF_PROTECTION`.
+    - *Mass Assignment Protection*: Stripped sensitive columns (`is_seed`, `auto_created`, `role`, `owner_id`) from client-writable Pydantic schemas. Enforced string bounds across all schemas.
+  - **API Rate Limiting, Middleware & Traffic Shaping**:
+    - *Rate Limiting*: Tightened authentication limits to 10 req/min for login and 5 req/hour for registration with 15-minute brute-force lockout after 5 consecutive failures.
+    - *Request Body Size Limit*: Middleware rejects payloads exceeding 1MB with `HTTP 413 Payload Too Large`.
+    - *Enhanced Security Headers*: Injected `Content-Security-Policy`, `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy`.
+    - *Report Path Traversal Protection*: Download routes canonicalize paths using `os.path.realpath()` and verify containment strictly within `/app/reports`, returning `HTTP 404` for invalid or traversing paths.
+    - *Sanitized Exception Handling*: Generic 500 error responses returned to clients with zero tracebacks leaked.
+    - *Hardened Nginx Frontend*: Configured `server_tokens off;` and `autoindex off;` with security response headers.
 
 ---
 

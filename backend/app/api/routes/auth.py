@@ -23,21 +23,23 @@ LOCKOUT_DURATION = timedelta(minutes=15)
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-@limiter.limit("100/minute")
+@limiter.limit("5/hour")
 async def register(
     request: Request,
     user_in: UserCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """Register a new user. The first registered user is automatically granted Admin role."""
-    # Check if user already exists
+    normalized_email = user_in.email.strip().lower()
+
+    # Check if user already exists (anti-enumeration: generic error message)
     existing_user_query = await db.execute(
-        select(User).where(User.email == user_in.email)
+        select(User).where(User.email == normalized_email)
     )
     if existing_user_query.scalar_one_or_none() is not None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email address already exists",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to complete registration with the provided credentials. Please verify your information or proceed to sign in.",
         )
 
     # First user becomes admin, subsequent users default to analyst
@@ -46,9 +48,9 @@ async def register(
     assigned_role = UserRole.admin if total_users == 0 else UserRole.analyst
 
     db_user = User(
-        email=user_in.email,
+        email=normalized_email,
         password_hash=hash_password(user_in.password),
-        full_name=user_in.full_name,
+        full_name=user_in.full_name.strip(),
         role=assigned_role,
         is_active=True,
     )
@@ -59,7 +61,7 @@ async def register(
 
 
 @router.post("/login", response_model=Token)
-@limiter.limit("100/minute")
+@limiter.limit("10/minute")
 async def login(
     request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],

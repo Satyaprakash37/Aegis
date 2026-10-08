@@ -34,13 +34,18 @@ async def lifespan(app: FastAPI):
     """Lifecycle manager: Validate configuration, recover interrupted scans, and fail-fast on insecure settings."""
     logger.info("Initializing AEGIS SecOps Core v%s...", settings.VERSION)
 
-    # Fail fast if SECRET_KEY is missing or dangerously insecure
-    if not settings.SECRET_KEY or len(settings.SECRET_KEY.strip()) < 16:
-        logger.critical("FATAL: SECRET_KEY is not configured or too short (minimum 16 characters required).")
-        raise RuntimeError("Insecure configuration: SECRET_KEY must be at least 16 characters.")
+    # Fail fast if SECRET_KEY is missing or dangerously insecure (min 32 chars)
+    if not settings.SECRET_KEY or len(settings.SECRET_KEY.strip()) < 32:
+        logger.critical("FATAL: SECRET_KEY is not configured or too short (minimum 32 characters required).")
+        raise RuntimeError("Insecure configuration: SECRET_KEY must be at least 32 characters.")
 
-    if settings.SECRET_KEY == "change_this_to_a_secure_random_string_in_production":
-        logger.warning("SECURITY WARNING: Using default development SECRET_KEY. Ensure a cryptographically secure key is used in production!")
+    if settings.SECRET_KEY in [
+        "super_secret_jwt_key_phase_0",
+        "change_this_to_a_secure_random_string_in_production",
+        "change_me_to_a_cryptographically_secure_random_key_min_32_chars",
+    ]:
+        logger.critical("FATAL: Default/insecure development SECRET_KEY detected. Refusing to run in secure mode.")
+        raise RuntimeError("Insecure configuration: Default or placeholder SECRET_KEY is forbidden.")
 
     # Startup recovery routine: mark any lingering/stuck scans from previous runs as failed
     try:
@@ -96,6 +101,30 @@ app.add_middleware(
 )
 
 
+# Request Body Size Limit Middleware (Max 1MB)
+MAX_BODY_SIZE = 1024 * 1024  # 1 Megabyte
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    """Enforce 1MB maximum payload size limit on incoming requests."""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_BODY_SIZE:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": "Request payload exceeds maximum allowed size of 1MB.",
+                        "data": None,
+                        "message": "Payload Too Large: maximum body size is 1MB.",
+                        "status": "error",
+                    },
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
+
+
 # Security Headers Middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -105,6 +134,17 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 ws:; "
+        "frame-ancestors 'none';"
+    )
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     return response
 
 

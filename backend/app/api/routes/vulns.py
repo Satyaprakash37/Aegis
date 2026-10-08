@@ -163,7 +163,7 @@ async def list_vulnerabilities(
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
 
-    # Sortable columns
+    # Sortable columns whitelist validation
     sort_column_map = {
         "cvss_score": Vulnerability.cvss_score,
         "risk_score": Vulnerability.risk_score,
@@ -171,6 +171,18 @@ async def list_vulnerabilities(
         "first_seen_at": Vulnerability.first_seen_at,
         "id": Vulnerability.id,
     }
+    if sort_by and sort_by not in sort_column_map:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid sort_by parameter '{sort_by}'. Allowed fields: {', '.join(sorted(sort_column_map.keys()))}",
+        )
+
+    if order and order.lower() not in {"asc", "desc"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid order parameter '{order}'. Allowed values: 'asc', 'desc'",
+        )
+
     col = sort_column_map.get(sort_by, Vulnerability.cvss_score)
     order_func = desc if order and order.lower() == "desc" else asc
     query = query.order_by(order_func(col), Vulnerability.id.desc())

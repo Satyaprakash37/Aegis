@@ -21,11 +21,13 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api"
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/aegis"
-    SECRET_KEY: str = "super_secret_jwt_key_phase_0"
+    SECRET_KEY: str = "tt7pxPBH6vBi5h43PuoZiU4RajuKFqEXBPHc_4TCXCOvTxvC488kembI2TlWENTr"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     NVD_API_KEY: Union[str, None] = ""
+    ENABLE_SSRF_PROTECTION: bool = False
+    BLOCK_METADATA_IPS: bool = True
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

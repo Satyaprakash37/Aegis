@@ -16,19 +16,14 @@ class VulnSeverityCounts(BaseModel):
 
 
 class AssetBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255, description="Name of the asset")
+    name: str = Field(..., min_length=1, max_length=100, description="Name of the asset")
     ip_address: str = Field(..., min_length=1, max_length=255, description="Target IPv4 address, domain name, or URL")
     hostname: Optional[str] = Field(None, max_length=255)
     asset_type: AssetType
     environment: AssetEnvironment
     criticality: int = Field(..., ge=1, le=5, description="Criticality rating on a scale from 1 (Low) to 5 (Critical)")
-    owner: str = Field(default="Unassigned", max_length=255)
-    description: Optional[str] = None
-    target_type: Optional[TargetType] = TargetType.ip
-    resolved_ip: Optional[str] = None
-    auto_created: bool = False
-    is_seed: bool = False
-    owner_id: Optional[int] = None
+    owner: str = Field(default="Unassigned", max_length=100)
+    description: Optional[str] = Field(None, max_length=2000)
 
 
 class AssetCreate(AssetBase):
@@ -36,18 +31,14 @@ class AssetCreate(AssetBase):
 
 
 class AssetUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
     ip_address: Optional[str] = Field(None, min_length=1, max_length=255)
     hostname: Optional[str] = Field(None, max_length=255)
     asset_type: Optional[AssetType] = None
     environment: Optional[AssetEnvironment] = None
     criticality: Optional[int] = Field(None, ge=1, le=5)
-    owner: Optional[str] = Field(None, max_length=255)
-    description: Optional[str] = None
-    target_type: Optional[TargetType] = None
-    resolved_ip: Optional[str] = None
-    auto_created: Optional[bool] = None
-    is_seed: Optional[bool] = None
+    owner: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = Field(None, max_length=2000)
 
 
 class AssetRead(AssetBase):
@@ -56,6 +47,7 @@ class AssetRead(AssetBase):
     resolved_ip: Optional[str] = None
     auto_created: bool = False
     is_seed: bool = False
+    owner_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
