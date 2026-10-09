@@ -24,6 +24,7 @@ class AssetBase(BaseModel):
     criticality: int = Field(..., ge=1, le=5, description="Criticality rating on a scale from 1 (Low) to 5 (Critical)")
     owner: str = Field(default="Unassigned", max_length=100)
     description: Optional[str] = Field(None, max_length=2000)
+    is_lab: bool = Field(default=False, description="Flag indicating if the asset is an isolated lab target")
 
 
 class AssetCreate(AssetBase):
@@ -39,6 +40,7 @@ class AssetUpdate(BaseModel):
     criticality: Optional[int] = Field(None, ge=1, le=5)
     owner: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=2000)
+    is_lab: Optional[bool] = None
 
 
 class AssetRead(AssetBase):

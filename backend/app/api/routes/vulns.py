@@ -37,6 +37,7 @@ def _map_vuln_to_read(v: Vulnerability) -> VulnerabilityRead:
         asset_name=v.asset.name if v.asset else f"Asset #{v.asset_id}",
         asset_ip=v.asset.ip_address if v.asset else None,
         asset_criticality=v.asset.criticality if v.asset else 3,
+        asset_is_lab=bool(v.asset.is_lab) if v.asset else False,
         risk_tier=get_risk_tier(v.risk_score),
         cve_id=v.cve_id,
         title=v.title,

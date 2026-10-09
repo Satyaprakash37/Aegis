@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     BLOCK_METADATA_IPS: bool = True
     SUBFINDER_VIRUSTOTAL_KEY: str = ""
     SUBFINDER_SECURITYTRAILS_KEY: str = ""
+    MSF_RPC_HOST: str = "metasploit"
+    MSF_RPC_PORT: int = 55553
+    MSF_RPC_PASSWORD: str = "aegis_lab_msf_rpc_secret_55553"
+    MSF_RPC_SSL: bool = False
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

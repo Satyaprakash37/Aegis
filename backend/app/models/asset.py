@@ -26,6 +26,7 @@ class AssetEnvironment(str, enum.Enum):
     production = "production"
     staging = "staging"
     dev = "dev"
+    lab = "lab"
 
 
 class TargetType(str, enum.Enum):
@@ -69,6 +70,7 @@ class Asset(Base, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     auto_created: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     is_seed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    is_lab: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
     # Relationships
     owner_user: Mapped[Optional["User"]] = relationship("User", back_populates="assets")

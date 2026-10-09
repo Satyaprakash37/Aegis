@@ -24,6 +24,7 @@ export function EnvironmentBadge({ env }) {
     production: { label: 'Production', bg: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
     staging: { label: 'Staging', bg: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
     dev: { label: 'Development', bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+    lab: { label: 'Lab Environment', bg: 'bg-purple-500/15 text-purple-300 border-purple-500/30' },
   };
 
   const current = configs[env?.toLowerCase()] || {
@@ -249,3 +250,14 @@ export function DangerScoreBadge({ score, showBar = true }) {
   );
 }
 
+export function LabBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-semibold border bg-purple-500/20 text-purple-300 border-purple-500/40 shadow-[0_0_8px_rgba(168,85,247,0.2)]"
+      title="Isolated Attack Simulation Lab Target"
+    >
+      <span>🧪</span>
+      <span>LAB</span>
+    </span>
+  );
+}

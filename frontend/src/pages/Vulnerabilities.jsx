@@ -568,6 +568,31 @@ export default function Vulnerabilities() {
 
             {/* Body */}
             <div className="p-6 space-y-5 overflow-y-auto">
+              {/* Lab Attack Simulation Hint */}
+              {selectedVuln.asset_is_lab && (
+                <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-800/40 flex items-center justify-between gap-3 animate-in fade-in">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-lg">🧪</span>
+                    <div>
+                      <div className="text-xs font-mono font-bold text-purple-300">
+                        Attack simulation available
+                      </div>
+                      <div className="text-[11px] text-purple-400/80 font-sans">
+                        Isolated lab target in aegis-lab-net. Controlled exploit validation enabled.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    disabled
+                    title="coming in v2.0"
+                    className="px-3 py-1.5 rounded-lg bg-purple-900/40 text-purple-400 border border-purple-700/40 text-xs font-mono opacity-60 cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                  >
+                    <span>Simulate Attack</span>
+                    <span className="text-[10px] bg-purple-950 px-1.5 py-0.5 rounded border border-purple-800/50">coming in v2.0</span>
+                  </button>
+                </div>
+              )}
+
               {/* Danger Assessment Engine Card */}
               <div className="p-4 rounded-xl bg-gradient-to-b from-rose-950/20 via-slate-950 to-slate-950 border border-rose-500/30 space-y-3">
                 <div className="flex items-center justify-between">

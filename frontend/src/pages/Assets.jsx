@@ -18,7 +18,7 @@ import {
   Loader2
 } from 'lucide-react';
 import api from '../api/client';
-import { CriticalityBadge, EnvironmentBadge } from '../components/Badge';
+import { CriticalityBadge, EnvironmentBadge, LabBadge } from '../components/Badge';
 import AssetModal from '../components/AssetModal';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
 import Toast from '../components/Toast';
@@ -267,6 +267,7 @@ export default function Assets() {
             <option value="production">Production</option>
             <option value="staging">Staging</option>
             <option value="dev">Development</option>
+            <option value="lab">Lab Environment</option>
           </select>
 
           {/* Criticality */}
@@ -384,6 +385,7 @@ export default function Assets() {
                         <span className="font-semibold text-slate-200 group-hover:text-cyan-300 transition-colors">
                           {asset.name}
                         </span>
+                        {asset.is_lab && <LabBadge />}
                         {asset.auto_created && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                             AUTO

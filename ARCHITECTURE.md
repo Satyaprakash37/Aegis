@@ -459,6 +459,30 @@ Professional external scanning must unmask virtual hosts and backend services ob
     - Phase B Authorized Target: Verified against `cutm.ac.in` behind Cloudflare edge `172.67.158.164`, mapping 5 confirmed origins across `115.241.211.x` (`.179`, `.182`, `.183`, `.185`, `.178`).
     - Automated Playwright suite verified rendering and evidence transparency with 0 console errors.
 
+- **Phase M0: AEGIS v2.0 Attack Lab Infrastructure & Safety Foundations**:
+  - **Scope & Objectives**:
+    - Build the containerized attack lab environment and safety foundations for AEGIS v2.0 without exploit execution or autonomous agents.
+    - Provide an isolated target network (`aegis-lab-net`) where known vulnerable containers can be audited and safely tested.
+  - **Isolated Lab Network (`aegis-lab-net`)**:
+    - Dedicated Docker bridge network (`aegis-lab-net`) hosting vulnerable targets: `lab-wordpress` (WordPress 5.4 / PHP 7.2 Apache), `lab-mysql` (MySQL 5.7), and `lab-dvwa` (Damn Vulnerable Web Application).
+    - `vulnerable-target` (`aegis-juice-shop`) joins both `default` and `aegis-lab-net`.
+    - Targets do NOT publish ports to the host system, isolating them from external network ingress.
+    - Dual-homed management services (`backend` and `metasploit`) join both `default` and `aegis-lab-net` to control scans and RPC communication.
+  - **Containerized Metasploit RPC Daemon (`msfrpcd`)**:
+    - Official image `metasploitframework/metasploit-framework` running `msfrpcd -P <MSF_RPC_PASSWORD> -S -a 0.0.0.0 -p 55553 -n -f` on port 55553.
+    - Client bridge (`backend/app/services/agent/msf_client.py`) using `pymetasploit3` with instant telemetry extraction (`client.core.stats` returning 7,119+ module inventory in 0.01s).
+    - Admin diagnostic API endpoint: `GET /api/agent/msf-status`.
+  - **Database & Asset Classification**:
+    - Added `is_lab: bool` column to `assets` table via Alembic migration `007_phase_m0_lab_infrastructure.py`.
+    - Added `lab` value to `asset_environment_enum`.
+    - Seed script `scripts/seed_lab.py` registers `lab-wordpress`, `lab-dvwa`, and marks `aegis-juice-shop` as lab targets (`is_lab=True`, `criticality=3`, `environment="lab"`).
+    - Single-label Docker container hostnames (`lab-wordpress`, `lab-dvwa`) are recognized and resolved by `target_resolver.py`.
+  - **Frontend Lab Awareness**:
+    - Assets Page: Renders purple `🧪 LAB` badge alongside lab assets.
+    - Vulnerabilities Drawer: Displays `🧪 Attack simulation available` banner and disabled placeholder button (`coming in v2.0`) for findings linked to lab assets.
+  - **Safety Boundaries**:
+    - Exploit execution capabilities are strictly bounded to lab targets (`is_lab=True`). Non-lab assets cannot be targeted with simulation payloads.
+
 ---
 
 ## 9. Operating Rules
@@ -467,3 +491,4 @@ Professional external scanning must unmask virtual hosts and backend services ob
 - Verify every phase thoroughly with integration testing / browser verification before declaring completion.
 - Ensure Docker container builds and services run cleanly.
 - Maintain transparent communication and clarify ambiguities proactively.
+

@@ -272,6 +272,79 @@ docker compose exec backend python -m scripts.seed
 
 ---
 
+## AEGIS v2.0: Attack Lab Infrastructure (Phase M0)
+
+AEGIS v2.0 introduces an isolated **Attack Lab** environment designed for authorized security posture assessment, controlled exploit verification, and offensive-defensive validation.
+
+> [!CAUTION]
+> **Safety Notice:** All simulated attack and verification workflows are strictly restricted to isolated lab assets (`is_lab=True`) residing on the private `aegis-lab-net` Docker network. AEGIS enforces hard boundaries preventing exploit payload transmission to production or staging assets.
+
+### Lab Architecture & Network Isolation
+
+```mermaid
+flowchart TD
+    subgraph Host["Host Environment (Development / SOC)"]
+        Browser["Analyst Browser (Port 3000)"]
+    end
+
+    subgraph DefaultNet["Default Bridge Network (aegis_default)"]
+        Frontend["aegis-frontend (:3000)"]
+        Postgres["aegis-postgres (:5432)"]
+        Proxy["aegis-proxy (:8088)"]
+    end
+
+    subgraph DualNet["Dual-Homed Infrastructure"]
+        Backend["aegis-backend (:8000)"]
+        MSF["aegis-metasploit (:55553 msfrpcd)"]
+        JuiceShop["aegis-juice-shop (:3000)"]
+    end
+
+    subgraph LabNet["Isolated Attack Lab Network (aegis-lab-net)"]
+        WP["lab-wordpress (:80)"]
+        MySQL["lab-mysql (:3306)"]
+        DVWA["lab-dvwa (:80)"]
+    end
+
+    Browser --> Frontend
+    Browser --> Backend
+    Frontend --> Backend
+    Backend --> Postgres
+    Backend <-->|RPC msfrpcd| MSF
+    Proxy --> JuiceShop
+
+    Backend -->|Audit & Probing| WP
+    Backend -->|Audit & Probing| DVWA
+    Backend -->|Audit & Probing| JuiceShop
+    MSF -->|Simulated Exploits| WP
+    MSF -->|Simulated Exploits| DVWA
+    MSF -->|Simulated Exploits| JuiceShop
+    WP --> MySQL
+```
+
+### Lab Services Inventory
+
+| Service | Container Image | Network(s) | Description |
+| :--- | :--- | :--- | :--- |
+| **`metasploit`** | `metasploitframework/metasploit-framework` | `default`, `aegis-lab-net` | Containerized Metasploit RPC daemon (`msfrpcd`) listening on port 55553 without external host port exposure. |
+| **`lab-wordpress`** | `wordpress:5.4-php7.2-apache` | `aegis-lab-net` | Legacy vulnerable WordPress 5.4 environment with PHP 7.2 Apache for web application exploit analysis. |
+| **`lab-mysql`** | `mysql:5.7` | `aegis-lab-net` | Dedicated database backend for the vulnerable WordPress installation. |
+| **`lab-dvwa`** | `vulnerables/web-dvwa:latest` | `aegis-lab-net` | Damn Vulnerable Web Application (DVWA v1.10) for testing command injection, SQLi, and XSS findings. |
+| **`vulnerable-target`** | `bkimminich/juice-shop:latest` | `default`, `aegis-lab-net` | Modern OWASP Juice Shop SPA target for simulated API and business logic testing. |
+
+### Lab Setup & Verification
+
+1. **Seed Lab Targets:**
+   ```bash
+   docker compose exec backend python -m scripts.seed_lab
+   ```
+2. **Verify Metasploit RPC Bridge:**
+   ```bash
+   curl -H "Authorization: Bearer <ADMIN_TOKEN>" http://localhost:8000/api/agent/msf-status
+   ```
+   *Returns:* `{"connected": true, "status": "online", "version": "6.5.6-dev", "modules_count": 7119+}`
+
+---
+
 ## Roadmap
 
 - [ ] **Distributed Scanning Agents:** Deploy lightweight remote Nmap worker nodes across VPCs and cloud regions via Celery + Redis.
