@@ -682,6 +682,41 @@ Completed in AEGIS v2.0 Phase R2:
      - Captured artifacts: `attack_surface_intel_page.png`, `attack_path_chain_visualization.png`, `attack_surface_empty_state.png`.
    - Backend hardening and regression test suite passed cleanly.
 
+### 10.10 Phase R3 Implementation Summary: Red Team Console UI
+Completed in AEGIS v2.0 Phase R3:
+1. **Database Migration (`011_phase_r3_operator_actions.py`)**:
+   - Created `operator_actions` table: `id`, `asset_id` (FK to assets), `user_id` (FK to users), `tool` (VARCHAR(50)), `command_or_action` (TEXT), `result_summary` (TEXT), `evidence` (TEXT nullable), `linked_cves` (JSONB nullable), `created_at` (TIMESTAMP with timezone).
+   - Added indexes on `asset_id`, `created_at`, and compound `(asset_id, created_at)` for fast audit query retrieval.
+   - Built SQLAlchemy model `OperatorAction` and Pydantic schemas (`OperatorActionCreate`, `OperatorActionRead`, `OperatorActionListResponse`).
+2. **API Routes (`app/api/routes/operator.py`)**:
+   - `POST /api/operator-actions`: Records operator testing actions; validates asset existence, sanitizes inputs, enforces analyst/admin role (viewers denied HTTP 403).
+   - `GET /api/operator-actions/{asset_id}`: Retrieves chronological audit log with pagination support (`limit`, `offset`).
+   - `DELETE /api/operator-actions/{id}`: Admin-only deletion endpoint for audit maintenance.
+   - Mounted on main application router at `/api/operator-actions`.
+3. **Red Team Console Flagship Workspace (`/console` - `Console.jsx`)**:
+   - 3-zone operations layout featuring a dark terminal aesthetic (`bg-[#0a0f1d]`, font mono, slate/cyan/purple highlights).
+   - **Workspace Header**: Interactive target asset dropdown selector, live status & context chips (criticality, total vulns, CISA KEV count), quick link to `/assets/{id}/intel` ("Open Full Intel"), and clear session action.
+   - **Left Zone (AI Operations Copilot)**: Integrated real-time analyst chat, smart suggestion chips, multi-turn tool calling indicators (`tools: [check_kev, get_epss, ...]`), target context auto-injection, and session reset.
+   - **Right Zone (Operator Log & Audit Trail)**: Fast action logging form (tool dropdown: Nmap, Manual Test, Browser, cURL, Nuclei, Metasploit, Custom; command/action input; outcome notes; collapsible stdout evidence paste; target CVE quick-add chips) and live chronological timeline showing action cards with formatted timestamps, copyable commands, outcome summaries, expandable raw evidence, and linked CVE pills.
+   - **Bottom Zone**: Session telemetry bar with active targets, total recorded actions, and VAPT assessment export preview.
+   - Role-gated: Viewer role users are denied console access with a warning screen.
+4. **Navigation & Deep Linking**:
+   - Added `🛰️ Red Team Console` to sidebar navigation (filtered out for viewer users).
+   - Redirected legacy `/copilot-test` route directly to `/console`.
+   - Enhanced Vulnerabilities drawer (`Vulnerabilities.jsx`) with quick-button: "Log operator action for this finding", deep-linking directly to `/console?asset_id={asset_id}&cve={cve_id}` with pre-selected target and pre-linked CVE.
+5. **Automated Verification**:
+   - Comprehensive Playwright test suite `scripts/verify_phase_r3.py` verified:
+     - 403 Forbidden enforcement on operator actions API for viewer role.
+     - Login, navigation, and legacy `/copilot-test` redirect to `/console`.
+     - Target context telemetry chips for Asset 52 (`lab-wordpress`).
+     - Real-time Copilot chat response with tool usage chips.
+     - Logging 3 distinct operator actions (Nmap scan, manual browser probe, remediation check) with evidence and linked CVEs.
+     - Vulnerability drawer quick-button deep-link into console with query parameters.
+     - Access denial UI verification for viewer role.
+     - 0 browser console errors.
+     - Visual artifacts captured: `console_full_workspace.png`, `console_chat_in_action.png`, `console_action_log_timeline.png`, `vuln_drawer_console_button.png`.
+   - Regression and hardening test suite passed 100%.
+
 ---
 
 ## 11. Operating Rules

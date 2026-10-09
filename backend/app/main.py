@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-from app.api.routes import agent, assets, auth, copilot, dashboard, health, notifications, reports, scans, threat_intel, vulns
+from app.api.routes import agent, assets, auth, copilot, dashboard, health, notifications, operator, reports, scans, threat_intel, vulns
 from app.core.config import settings
 from app.core.limiter import limiter
 
@@ -203,3 +203,4 @@ app.include_router(notifications.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
 app.include_router(threat_intel.router, prefix="/api")
 app.include_router(copilot.router, prefix="/api")
+app.include_router(operator.router, prefix="/api")

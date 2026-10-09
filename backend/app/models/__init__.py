@@ -14,6 +14,7 @@ from app.models.vulnerability import (
 )
 from app.models.report import Report, ReportType, ReportFormat
 from app.models.chat_message import ChatMessage
+from app.models.operator_action import OperatorAction
 
 __all__ = [
     "Base",
@@ -33,4 +34,5 @@ __all__ = [
     "ReportType",
     "ReportFormat",
     "ChatMessage",
+    "OperatorAction",
 ]

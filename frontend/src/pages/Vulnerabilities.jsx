@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { 
   ShieldAlert, 
   Search, 
@@ -899,7 +899,14 @@ export default function Vulnerabilities() {
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex justify-end">
+            <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between gap-3">
+              <Link
+                to={`/console?asset_id=${selectedVuln.asset_id}&cve=${selectedVuln.cve_id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-950/60 border border-teal-800/60 hover:bg-teal-900/60 text-teal-300 hover:text-teal-100 font-mono text-xs font-semibold transition-all shadow-sm shadow-teal-950/40"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                <span>Log operator action for this finding</span>
+              </Link>
               <button
                 onClick={() => setSelectedVuln(null)}
                 className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono text-xs transition-colors cursor-pointer"
