@@ -165,8 +165,82 @@ async def get_suggested_questions(
     suggestions = [
         "What are the most critical findings on this target?",
         "Which vulnerabilities are actively exploited right now?",
+        "Explain the attack paths for this target",
         "What should the operator assess first and why?",
         "Summarize the attack surface of this target",
         "Which findings have public exploits documented?",
     ]
     return SuggestionsResponse(asset_id=asset_id, suggestions=suggestions)
+
+
+@router.post(
+    "/assets/{id}/attack-surface/generate",
+    summary="Generate AI Attack Surface Intelligence Report",
+    description="Trigger defensive attack surface profiling and attack path analysis.",
+)
+async def generate_copilot_attack_surface(
+    id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_analyst_or_admin)],
+) -> Dict[str, Any]:
+    """Generate or regenerate attack surface report via copilot router."""
+    from app.services.copilot.attack_surface import generate_attack_surface_report
+
+    stmt = select(Asset).where(Asset.id == id)
+    res = await db.execute(stmt)
+    asset = res.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset with ID {id} not found.",
+        )
+
+    try:
+        report = await generate_attack_surface_report(id, db)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate attack surface report: {str(e)}",
+        )
+
+    return {
+        "status": "success",
+        "asset_id": id,
+        "report_generated_at": asset.report_generated_at.isoformat() if asset.report_generated_at else None,
+        "data": report,
+    }
+
+
+@router.get(
+    "/assets/{id}/attack-surface",
+    summary="Get cached AI Attack Surface Intelligence Report",
+    description="Retrieve existing attack surface report or 404 if not yet generated.",
+)
+async def get_copilot_attack_surface(
+    id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_analyst_or_admin)],
+) -> Dict[str, Any]:
+    """Retrieve cached attack surface report via copilot router."""
+    stmt = select(Asset).where(Asset.id == id)
+    res = await db.execute(stmt)
+    asset = res.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset with ID {id} not found.",
+        )
+
+    if not asset.attack_surface_report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No intelligence report yet. Please generate attack surface analysis.",
+        )
+
+    return {
+        "status": "success",
+        "asset_id": id,
+        "report_generated_at": asset.report_generated_at.isoformat() if asset.report_generated_at else None,
+        "data": asset.attack_surface_report,
+    }
+

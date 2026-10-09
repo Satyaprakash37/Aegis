@@ -379,3 +379,34 @@ class CopilotToolbox:
             "total_open_findings": len([v for v in vulns if v.status == VulnerabilityStatus.open]),
             "prioritized_checklist": priorities,
         }
+
+    async def get_attack_surface(self, asset_id: int) -> Dict[str, Any]:
+        """Retrieve the cached attack surface report and attack paths for an asset.
+
+        Args:
+            asset_id: Integer identifier of the target asset.
+        """
+        stmt = select(Asset).where(Asset.id == asset_id)
+        res = await self.db.execute(stmt)
+        asset = res.scalar_one_or_none()
+        if not asset:
+            return {"error": f"Asset {asset_id} not found."}
+
+        report = asset.attack_surface_report
+        if not report:
+            from app.services.copilot.attack_surface import generate_attack_surface_report
+            report = await generate_attack_surface_report(asset_id, self.db)
+
+        return {
+            "asset_id": asset_id,
+            "asset_name": asset.name,
+            "target_ip": asset.ip_address,
+            "report_generated_at": asset.report_generated_at.isoformat() if asset.report_generated_at else None,
+            "executive_summary": report.get("executive_summary"),
+            "entry_points": report.get("attack_surface_map", {}).get("entry_points", []),
+            "exposed_services": report.get("attack_surface_map", {}).get("exposed_services", []),
+            "trust_boundaries": report.get("attack_surface_map", {}).get("trust_boundaries"),
+            "attack_paths": report.get("attack_paths", []),
+            "prioritized_concerns": report.get("prioritized_concerns", []),
+        }
+

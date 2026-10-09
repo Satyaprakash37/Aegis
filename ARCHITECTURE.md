@@ -647,6 +647,41 @@ Completed in AEGIS v2.0 Phase R1:
 6. **Automated Verification**:
    - Comprehensive verification suite `scripts/verify_phase_r1.py` covering missing key 503 handling, multi-turn reasoning, factual cross-checking against target findings, history persistence, and browser UI interaction with 0 console errors.
 
+### 10.9 Phase R2 Implementation Summary: Attack Surface Intelligence
+Completed in AEGIS v2.0 Phase R2:
+1. **Attack Surface Intelligence Service (`app/services/copilot/attack_surface.py`)**:
+   - Defensive security architect analytical engine generating structured asset risk profiling and multi-step attack path narratives.
+   - Strictly enforces 100% CVE veracity: all attack path chains and `findings_refs` reference only cataloged vulnerabilities present on the target asset.
+   - Dual-engine architecture: live Gemini structured JSON generation with automatic fallback to high-fidelity deterministic defensive analyst engine.
+   - Clean empty-state generator for assets with 0 findings preventing crashes and providing clear visibility into baseline coverage.
+   - Caches report in `Asset.attack_surface_report` (JSONB) and updates `Asset.report_generated_at` (TIMESTAMP).
+2. **Database Migration (`010_phase_r2_attack_surface.py`)**:
+   - Added `attack_surface_report` (JSONB, nullable) and `report_generated_at` (DateTime with timezone, nullable) to `assets` table.
+3. **API Routes (`app/api/routes/copilot.py` and `app/api/routes/assets.py`)**:
+   - `POST /api/assets/{id}/attack-surface/generate`: Generates/regenerates intelligence report and updates timestamp.
+   - `GET /api/assets/{id}/attack-surface`: Returns cached intelligence report or HTTP 404 with generation hint.
+   - Added `"Explain the attack paths for this target"` to data-driven Copilot suggested questions.
+4. **Copilot Tool & Chat Integration**:
+   - Added `get_attack_surface(asset_id)` tool to `CopilotToolbox` and `CopilotEngine`.
+   - Copilot chat automatically dispatches `get_attack_surface` when asked about attack paths or chains, explaining potential progressions and citing telemetry.
+5. **Interactive UI (`/assets/:id/intel` - `AssetIntel.jsx`)**:
+   - Prominent Executive Security Posture Assessment card.
+   - Attack Surface Map featuring Entry Points grid, Exposed Services inventory table, and Trust Boundaries narrative.
+   - Correlated Attack Path Narratives with step progression cards (Phase 1 → Phase 2 → Phase 3), likelihood/impact badges, and clickable CVE chips linking to vulnerability records.
+   - Prioritized Concerns ranked list highlighting CISA KEV and active threats with concrete remediation actions.
+   - Clean empty state with "Generate Analysis" CTA and staged progress indicator during generation.
+   - "Intel" action button added per row in the Assets list table (`/assets`).
+6. **Automated Verification**:
+   - Comprehensive suite `scripts/verify_phase_r2.py` verified 100% test passage:
+     - Verified generation on `lab-wordpress` (Asset 52) and `juice-shop` (Asset 45).
+     - Verified 100% accuracy check with 0 hallucinated CVEs.
+     - Verified clean empty state on Asset 53 (`lab-dvwa`).
+     - Verified regeneration timestamp updating.
+     - Verified Copilot chat tool integration.
+     - Verified browser UI rendering and 0 console errors via Playwright.
+     - Captured artifacts: `attack_surface_intel_page.png`, `attack_path_chain_visualization.png`, `attack_surface_empty_state.png`.
+   - Backend hardening and regression test suite passed cleanly.
+
 ---
 
 ## 11. Operating Rules

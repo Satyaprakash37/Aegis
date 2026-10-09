@@ -50,6 +50,8 @@ class AssetRead(AssetBase):
     auto_created: bool = False
     is_seed: bool = False
     owner_id: Optional[int] = None
+    attack_surface_report: Optional[dict] = None
+    report_generated_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

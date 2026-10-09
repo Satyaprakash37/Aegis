@@ -10,6 +10,7 @@ import Scans from './pages/Scans';
 import Vulnerabilities from './pages/Vulnerabilities';
 import Reports from './pages/Reports';
 import CopilotTest from './pages/CopilotTest';
+import AssetIntel from './pages/AssetIntel';
 import NotFound from './pages/NotFound';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -31,7 +32,11 @@ function PageTitleUpdater() {
       '/register': 'AEGIS | Analyst Registration',
     };
 
-    document.title = titles[location.pathname] || 'AEGIS | Vulnerability Management Platform';
+    if (location.pathname.includes('/intel')) {
+      document.title = 'AEGIS | Attack Surface Intelligence';
+    } else {
+      document.title = titles[location.pathname] || 'AEGIS | Vulnerability Management Platform';
+    }
   }, [location]);
 
   return null;
@@ -91,6 +96,7 @@ export default function App() {
             >
               <Route index element={<Dashboard />} />
               <Route path="assets" element={<Assets />} />
+              <Route path="assets/:id/intel" element={<AssetIntel />} />
               <Route path="scans" element={<Scans />} />
               <Route path="vulns" element={<Vulnerabilities />} />
               <Route path="vulnerabilities" element={<Vulnerabilities />} />

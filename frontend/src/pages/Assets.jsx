@@ -15,8 +15,10 @@ import {
   SlidersHorizontal,
   X,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Sparkles
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import api from '../api/client';
 import { CriticalityBadge, EnvironmentBadge, LabBadge } from '../components/Badge';
 import AssetModal from '../components/AssetModal';
@@ -452,6 +454,14 @@ export default function Assets() {
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="inline-flex items-center gap-1.5">
+                        <Link
+                          to={`/assets/${asset.id}/intel`}
+                          title="Attack Surface Intel"
+                          className="px-2 py-1 rounded bg-purple-950/40 border border-purple-800/40 hover:bg-purple-900/50 text-purple-300 hover:text-purple-100 text-[11px] font-mono font-medium flex items-center gap-1 transition-colors"
+                        >
+                          <Sparkles className="w-3 h-3 text-purple-400" />
+                          <span>Intel</span>
+                        </Link>
                         <button
                           onClick={() => setEditingAsset(asset)}
                           title="Edit Asset"

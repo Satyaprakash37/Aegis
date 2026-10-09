@@ -359,3 +359,68 @@ async def delete_asset(
         "message": f"Asset '{asset.name}' (ID: {id}) deleted successfully.",
         "status": "success",
     }
+
+
+@router.post("/{id}/attack-surface/generate")
+async def generate_asset_attack_surface(
+    id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_analyst_or_admin)],
+) -> dict:
+    """Generate or regenerate AI Attack Surface Intelligence Report for an asset."""
+    from app.services.copilot.attack_surface import generate_attack_surface_report
+
+    stmt = select(Asset).where(Asset.id == id)
+    res = await db.execute(stmt)
+    asset = res.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset with ID {id} not found.",
+        )
+
+    try:
+        report = await generate_attack_surface_report(id, db)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate attack surface report: {str(e)}",
+        )
+
+    return {
+        "status": "success",
+        "asset_id": id,
+        "report_generated_at": asset.report_generated_at.isoformat() if asset.report_generated_at else None,
+        "data": report,
+    }
+
+
+@router.get("/{id}/attack-surface")
+async def get_asset_attack_surface(
+    id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_analyst_or_admin)],
+) -> dict:
+    """Retrieve cached AI Attack Surface Intelligence Report for an asset."""
+    stmt = select(Asset).where(Asset.id == id)
+    res = await db.execute(stmt)
+    asset = res.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset with ID {id} not found.",
+        )
+
+    if not asset.attack_surface_report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No intelligence report yet. Please generate attack surface analysis.",
+        )
+
+    return {
+        "status": "success",
+        "asset_id": id,
+        "report_generated_at": asset.report_generated_at.isoformat() if asset.report_generated_at else None,
+        "data": asset.attack_surface_report,
+    }
+

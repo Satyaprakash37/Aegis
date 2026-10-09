@@ -116,6 +116,17 @@ TOOL_DECLARATIONS = [
                     "required": ["asset_id"],
                 },
             },
+            {
+                "name": "get_attack_surface",
+                "description": "Retrieve comprehensive attack surface profile, exposed services, and correlated attack path narratives for an asset.",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "asset_id": {"type": "INTEGER", "description": "Target asset identifier."}
+                    },
+                    "required": ["asset_id"],
+                },
+            },
         ]
     }
 ]
@@ -155,6 +166,8 @@ class CopilotEngine:
             )
         elif name == "suggest_next_steps":
             res = await self.toolbox.suggest_next_steps(int(clean_args.get("asset_id", 0)))
+        elif name == "get_attack_surface":
+            res = await self.toolbox.get_attack_surface(int(clean_args.get("asset_id", 0)))
         else:
             res = {"error": f"Unknown tool: {name}"}
 
@@ -386,7 +399,41 @@ class CopilotEngine:
                 lines.append("")
             reply = "\n".join(lines)
 
-        # Scenario D: Attack surface summary / scan results
+        # Scenario D1: Attack paths and chained narratives
+        elif any(term in msg_lower for term in ["attack path", "attack paths", "explain the attack paths", "path narrative", "chain"]):
+            intel_data = await self.toolbox.get_attack_surface(asset_id)
+            tools_used.append({
+                "tool": "get_attack_surface",
+                "args": {"asset_id": asset_id},
+                "summary": f"get_attack_surface(asset_id={asset_id})",
+            })
+
+            paths = intel_data.get("attack_paths", [])
+            lines = [
+                f"### Correlated Attack Path Intelligence for {asset_ctx.get('name')} (`{asset_ctx.get('ip_address')}`)",
+                "",
+            ]
+            if paths:
+                lines.append(f"Based on telemetry correlation and threat intelligence, AEGIS identified **{len(paths)} potential attack path narrative(s)** for this target:\n")
+                for idx, p in enumerate(paths, 1):
+                    likelihood_badge = f"`{p.get('likelihood', 'medium').upper()}`"
+                    cve_refs = ", ".join(f"`{c}`" for c in p.get("findings_refs", []))
+                    lines.append(f"#### Path {idx}: {p.get('title')}")
+                    lines.append(f"- **Likelihood**: {likelihood_badge} | **Impact**: {p.get('impact')}")
+                    lines.append(f"- **Referenced Telemetry**: {cve_refs or 'Service exposure'}")
+                    lines.append("- **Potential Attack Progression**:")
+                    for step in p.get("chain", []):
+                        lines.append(f"  - {step}")
+                    lines.append("")
+                lines.append("**Defensive Strategy**: Disrupting the initial entry point steps will effectively neutralize the downstream impact of these potential exploit chains.")
+            else:
+                lines.append(
+                    f"No active attack path chains could be correlated from existing scan telemetry. "
+                    f"Target **{asset_ctx.get('name')}** currently reports zero high-risk unauthenticated vulnerabilities."
+                )
+            reply = "\n".join(lines)
+
+        # Scenario D2: Attack surface summary / scan results
         elif any(term in msg_lower for term in ["attack surface", "scans", "history", "surface", "ports"]):
             scan_data = await self.toolbox.get_scan_results(asset_id, limit=5)
             tools_used.append({
