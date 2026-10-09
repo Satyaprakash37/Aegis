@@ -41,6 +41,8 @@ services:
       - MSF_RPC_HOST=metasploit
       - MSF_RPC_PORT=55553
       - MSF_RPC_PASSWORD=${MSF_RPC_PASSWORD:-aegis_lab_msf_rpc_secret_55553}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - COPILOT_MODEL=${COPILOT_MODEL:-gemini-2.0-flash}
     depends_on:
       postgres:
         condition: service_healthy

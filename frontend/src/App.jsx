@@ -9,6 +9,7 @@ import Assets from './pages/Assets';
 import Scans from './pages/Scans';
 import Vulnerabilities from './pages/Vulnerabilities';
 import Reports from './pages/Reports';
+import CopilotTest from './pages/CopilotTest';
 import NotFound from './pages/NotFound';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -25,6 +26,7 @@ function PageTitleUpdater() {
       '/vulns': 'AEGIS | Vulnerability Register',
       '/vulnerabilities': 'AEGIS | Vulnerability Register',
       '/reports': 'AEGIS | Compliance & Audit Reports',
+      '/copilot-test': 'AEGIS | AI Operations Copilot',
       '/login': 'AEGIS | Authentication Portal',
       '/register': 'AEGIS | Analyst Registration',
     };
@@ -93,6 +95,7 @@ export default function App() {
               <Route path="vulns" element={<Vulnerabilities />} />
               <Route path="vulnerabilities" element={<Vulnerabilities />} />
               <Route path="reports" element={<Reports />} />
+              <Route path="copilot-test" element={<CopilotTest />} />
             </Route>
             <Route path="/404" element={<NotFound />} />
             <Route path="*" element={<NotFound />} />

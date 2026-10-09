@@ -8,7 +8,8 @@ import {
   ShieldAlert, 
   Activity, 
   FileText,
-  Cpu
+  Cpu,
+  Bot
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -39,6 +40,7 @@ export default function Sidebar() {
     { id: 'vulnerabilities', path: '/vulns', label: 'Vulnerabilities', icon: ShieldAlert, badge: criticalHighCount },
     { id: 'scans', path: '/scans', label: 'Scans', icon: Activity },
     { id: 'reports', path: '/reports', label: 'Reports', icon: FileText },
+    { id: 'copilot', path: '/copilot-test', label: 'AI Copilot', icon: Bot, badge: 'v2.0' },
   ];
 
   return (

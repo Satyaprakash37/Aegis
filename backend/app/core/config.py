@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     MSF_RPC_PORT: int = 55553
     MSF_RPC_PASSWORD: str = "aegis_lab_msf_rpc_secret_55553"
     MSF_RPC_SSL: bool = False
+    GEMINI_API_KEY: str = ""
+    COPILOT_MODEL: str = "gemini-2.0-flash"
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
