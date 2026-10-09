@@ -26,6 +26,7 @@ from app.services.risk.danger_engine import evaluate_vulnerability_danger
 from app.services.scanner.nmap_runner import ScanExecutionError, run_nmap_scan
 from app.services.scanner.deep_scanner import run_deep_scan
 from app.services.scanner.vulnerability_upsert import upsert_vulnerability
+from app.services.threat_intel import get_threat_intel
 
 logger = logging.getLogger("aegis.pipeline")
 
@@ -190,6 +191,9 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                     description=description,
                 )
 
+                # Fetch threat intelligence (KEV, EPSS, exploit refs)
+                intel = await get_threat_intel(cve_id)
+
                 vuln_obj, _ = await upsert_vulnerability(
                     db=db,
                     asset_id=asset.id,
@@ -206,6 +210,10 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                     scan_id=scan.id,
                     remediation=v_finding.get("remediation") or "Apply official security patch or mitigation playbook immediately.",
                     asset_criticality=asset.criticality,
+                    epss_score=intel.get("epss_score"),
+                    in_kev=intel.get("in_kev", False),
+                    threat_level=intel.get("threat_level"),
+                    exploit_refs=intel.get("exploit_refs"),
                 )
 
                 await db.commit()
@@ -249,6 +257,9 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                         description=cve.get("description", ""),
                     )
 
+                    # Fetch threat intelligence (KEV, EPSS, exploit refs)
+                    intel = await get_threat_intel(cve_id)
+
                     title = f"{cve_id}: {cve['description'][:80]}..." if cve.get("description") else cve_id
                     vuln_obj, _ = await upsert_vulnerability(
                         db=db,
@@ -266,6 +277,10 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                         scan_id=scan.id,
                         remediation="Review vendor security advisories and update to the latest patched software version.",
                         asset_criticality=asset.criticality,
+                        epss_score=intel.get("epss_score"),
+                        in_kev=intel.get("in_kev", False),
+                        threat_level=intel.get("threat_level"),
+                        exploit_refs=intel.get("exploit_refs"),
                     )
 
                     await db.commit()

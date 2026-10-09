@@ -485,7 +485,138 @@ Professional external scanning must unmask virtual hosts and backend services ob
 
 ---
 
-## 9. Operating Rules
+## 10. AEGIS v2.0 Architecture: Red Team AI Copilot (Workflow Automation Platform)
+
+### 10.1 Overview & Core Philosophy
+Real-world offensive security practitioners and red team operators manually juggle 10+ disconnected tools (Nmap, Nuclei, testssl, CVE databases, Exploit-DB references, EPSS/KEV intelligence feeds, reporting tools). AEGIS v1 automates reconnaissance, scanning, and non-destructive verification.
+
+AEGIS v2.0 elevates the system into a comprehensive, AI-assisted operations platform:
+- **Operator-Assist Model (GitHub Copilot for Red Teams)**: The AI coordinates research, correlates telemetry, maps attack surfaces, suggests prioritized next steps, and auto-generates professional pentest reports.
+- **Human Decision Boundary**: Exploitation and active validation actions remain strictly human-driven, explicitly authorized, and comprehensively audited (VAPT industry standard).
+- **Safety & Authorization**: Strict asset boundary enforcement (`is_lab` checks and authorized asset framework). All operator actions are immutably logged.
+
+### 10.2 v2.0 Core Modules
+
+#### 1. AI Operations Copilot (`app/services/copilot/`)
+- Powered by Gemini with structured tool / function calling.
+- **Tools Available to Copilot**:
+  - `get_scan_results(asset_id)`: Access historical and active scan findings, open ports, and technologies.
+  - `research_cve(cve_id)`: Query CVE details, CVSS vectors, and enrichment data.
+  - `find_public_exploits(cve)`: Search public exploit references (Exploit-DB / MSF module identifiers as reference intelligence).
+  - `check_kev(cve_id)`: Check inclusion in CISA Known Exploited Vulnerabilities (KEV) catalog.
+  - `get_epss(cve_id)`: Query FIRST.org Exploit Prediction Scoring System (EPSS) probability and percentile.
+  - `get_asset_context(asset_id)`: Comprehensive asset profiling (ports, services, tech stack, vulnerability history).
+  - `correlate_findings(asset_id)`: Cross-reference multi-tool findings to identify correlated exposure patterns.
+  - `suggest_next_steps(asset_id)`: Generate a prioritized analytical checklist for the security analyst.
+- **Conversational Interface**: Operators can query platform data interactively (e.g., target risk analysis, prioritization, testing recommendations).
+
+#### 2. Attack Surface Intelligence
+- **Asset Attack Surface Profiling**: Automated synthesis of exposed components, entry points, service versions, and tech-stack risks.
+- **Attack Path Narratives**: Analytical correlation of findings into theoretical exposure chains (e.g., *exposed service port → outdated runtime → configuration disclosure → database credential risk*). Analysis and risk modeling only.
+
+#### 3. Red Team Console UI (`/console`)
+- Dedicated operator workspace designed with a dark terminal aesthetic matching the AEGIS theme.
+- **Split View Layout**:
+  - *Left Panel*: Interactive AI Copilot chat with function-call transparency.
+  - *Right Workspace*:
+    - Target Context Card (asset metadata, severity breakdown, quick stats).
+    - Operator Action Log: Manual command/action tracking form (`tool`, `command`, `result_summary`, `evidence`, `notes`) building the audit trail.
+    - AI Suggestions Feed (actionable next steps and analytical recommendations).
+
+#### 4. VAPT Report Generator Upgrade
+- Upgrades existing reporting engine to generate comprehensive **VAPT Assessment Reports** (PDF export).
+- **Report Sections**:
+  - Executive Summary & Scope Methodology.
+  - Attack Surface & Asset Exposure Summary.
+  - Prioritized Vulnerability Findings (enriched with CISA KEV status, EPSS scores, and public exploit references).
+  - Attack Path Narratives & Attack Chain Diagrams.
+  - Operator Action Audit Log (reconstructed from console logs).
+  - Actionable Remediation Plan & Prioritized Hardening Steps.
+  - Compliance & Framework Mapping.
+
+#### 5. Threat Intelligence Integrations
+- **CISA KEV Integration**: Local cached copy of CISA Known Exploited Vulnerabilities catalog (JSON) with monthly refresh mechanism.
+- **EPSS Scoring Integration**: Direct lookup of Exploit Prediction Scoring System scores to quantify likelihood of exploitation in the wild.
+- **Threat Indicators**: Highlighting "Actively Exploited" (KEV hit) and high-EPSS vulnerabilities across the platform dashboard.
+
+#### 6. Tool & Data Integrations
+- *Core Scanning Engine (v1.x)*: Nmap, Nuclei, testssl.sh, Subfinder, httpx.
+- *Threat Intel Feeds*: CISA KEV JSON catalog, EPSS API, Reference-based exploit intelligence.
+
+### 10.3 Database Schema (Alembic Migration)
+- `operator_actions`:
+  - `id`: Primary key (Integer)
+  - `asset_id`: Foreign key to `assets.id`
+  - `user_id`: Foreign key to `users.id`
+  - `tool`: String (e.g., `nmap`, `curl`, `manual`)
+  - `command`: Text
+  - `result_summary`: Text
+  - `evidence`: Text
+  - `timestamp`: DateTime (UTC, indexed)
+- `chat_messages`:
+  - `id`: Primary key (Integer)
+  - `asset_id`: Foreign key to `assets.id`
+  - `user_id`: Foreign key to `users.id`
+  - `role`: String (`user`, `assistant`, `system`, `tool`)
+  - `content`: Text
+  - `created_at`: DateTime (UTC, indexed)
+
+### 10.4 API Route Specifications
+- `POST /api/copilot/chat`: Accepts `{asset_id, message}` and returns AI copilot response with platform tool invocations.
+- `GET /api/copilot/history/{asset_id}`: Retrieves chat history for a specific asset context.
+- `POST /api/operator-actions`: Submits a manual operator action entry to the immutable audit log.
+- `GET /api/operator-actions/{asset_id}`: Fetches all logged operator actions for an asset.
+- `GET /api/assets/{id}/attack-surface`: Returns AI-generated attack surface intelligence report.
+- `POST /api/reports/generate` (`type="vapt"`): Generates the comprehensive VAPT Assessment PDF report.
+
+### 10.5 Phase Roadmap
+- **Phase R0**: Threat Intel Foundation (CISA KEV catalog sync + EPSS lookup + exploit reference mapping).
+- **Phase R1**: AI Operations Copilot Core (Gemini client + function calling tools + asset context integration).
+- **Phase R2**: Attack Surface Intelligence & Attack Path Narrative Generation.
+- **Phase R3**: Red Team Console UI (`/console` workspace: chat, action log, suggestions feed).
+- **Phase R4**: VAPT Assessment Report Generator Upgrade (PDF reporting with intel & action logs).
+- **Phase R5**: Polish, End-to-End Demonstration, v1.x Regression Verification, and `v2.0.0` Release Tag.
+
+### 10.6 Operating Principles & Guardrails
+- **Operator-in-the-Loop**: All active operational steps remain manual decisions executed by the human operator.
+- **Strict Authorization**: Validated asset targeting restricted to authorized and lab infrastructure.
+- **Full Traceability**: All AI recommendations and operator actions are cryptographically and temporally auditable.
+- **v1.x Regression Gate**: Full regression suite (dashboard, scans, reporting, asset management) must pass cleanly in every phase.
+
+### 10.7 Phase R0 Implementation Summary: Threat Intelligence Foundation
+Completed in AEGIS v2.0 Phase R0:
+1. **CISA KEV Catalog Integration (`app/services/threat_intel/kev.py`)**:
+   - Official feed ingestion from `cisa.gov` with local JSON caching in `app/data/kev_catalog.json`.
+   - Ingested 1,739 documented vulnerabilities (version `2026.10.08`), tracking 361 ransomware campaigns.
+   - High-throughput O(1) in-memory index for real-time lookups with automatic fallback and metadata extraction (`date_added`, `due_date`, `ransomware_campaign`).
+2. **FIRST EPSS Scoring Engine (`app/services/threat_intel/epss.py`)**:
+   - Direct integration with FIRST EPSS REST API (`api.first.org/data/v1/epss`) supporting single & batch lookups (up to 100 CVEs per request).
+   - Extracts probability scores, percentiles, and provides human-readable risk interpretation (`Very Likely Exploited`, `Likely Exploited`, `Moderately Likely`, etc.).
+3. **Exploit Reference Intelligence (`app/services/threat_intel/exploit_refs.py`)**:
+   - Automated classifier categorizing vulnerability references into `exploit-db`, `metasploit-module`, `github-poc`, `exploit-archive`, and `advisory`.
+   - Normalizes known exploit URLs and flags public weaponization availability.
+4. **Unified Threat Level Matrix (`app/services/threat_intel/__init__.py`)**:
+   - Multi-factor algorithmic rating:
+     - `ACTIVE-THREAT`: Listed in CISA KEV OR (EPSS > 0.50 AND public exploit available).
+     - `ELEVATED`: EPSS > 0.30 OR public exploit available with High/Critical severity.
+     - `MODERATE`: EPSS > 0.10 OR public exploit available with Medium severity.
+     - `LOW`: Standard residual vulnerabilities without known active in-the-wild exploitation.
+5. **Database Architecture & Migration**:
+   - Alembic migration `008_phase_r0_threat_intelligence.py` adds `in_kev` (Boolean, indexed), `threat_level` (String(30), indexed), and `exploit_refs` (JSONB/Text).
+   - Updated ORM models, Pydantic schemas, and scan upsert pipeline (`vulnerability_upsert.py`).
+6. **Data Backfill Metrics (`scripts/backfill_threat_intel.py`)**:
+   - 386 total database vulnerabilities enriched across 136 unique CVE identifiers.
+   - Identified 19 KEV hits (13 currently open), 330 EPSS scoring matches, 18 `ACTIVE-THREAT`, 13 `ELEVATED`, 86 `MODERATE`, 269 `LOW`.
+7. **Frontend SecOps Telemetry**:
+   - Dashboard: Added 6th primary KPI stat card `Actively Exploited (KEV)` displaying open catalog vulnerabilities.
+   - Vulnerabilities Table: Added interactive `Threat Intel` column featuring animated `ACTIVE THREAT` badges, `KEV ✓` chips, and exploit indicators.
+   - Detail Drawer: Dedicated `Threat Intelligence Feeds (CISA KEV + FIRST EPSS)` panel displaying catalog metadata, EPSS percentiles, and clickable categorized exploit reference pills.
+8. **Automated Verification**:
+   - End-to-end Playwright suite `scripts/verify_phase_r0.py` verified 100% test passage, zero browser console errors, and generated visual proof artifacts.
+
+---
+
+## 11. Operating Rules
 
 - Never implement future phases early; only execute the phase explicitly requested.
 - Verify every phase thoroughly with integration testing / browser verification before declaring completion.

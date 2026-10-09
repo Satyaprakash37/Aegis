@@ -58,6 +58,9 @@ def _map_vuln_to_read(v: Vulnerability) -> VulnerabilityRead:
         impact=v.impact,
         public_exploit=v.public_exploit,
         is_origin_direct=bool(v.evidence and "[ORIGIN CONFIG AUDIT]" in v.evidence),
+        in_kev=bool(v.in_kev),
+        threat_level=v.threat_level,
+        exploit_refs=v.exploit_refs,
         first_seen_at=v.first_seen_at,
         last_seen_at=v.last_seen_at,
     )

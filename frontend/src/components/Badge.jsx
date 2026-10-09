@@ -261,3 +261,49 @@ export function LabBadge() {
     </span>
   );
 }
+
+export function ThreatLevelBadge({ level, inKev = false }) {
+  const lvl = String(level || (inKev ? 'ACTIVE-THREAT' : 'LOW')).toUpperCase();
+  const configs = {
+    'ACTIVE-THREAT': { label: 'ACTIVE THREAT', bg: 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-[0_0_10px_rgba(244,63,94,0.25)]', icon: '🔴' },
+    'ELEVATED': { label: 'ELEVATED', bg: 'bg-orange-500/15 text-orange-300 border-orange-500/35 shadow-[0_0_8px_rgba(249,115,22,0.15)]', icon: '🟠' },
+    'MODERATE': { label: 'MODERATE', bg: 'bg-amber-500/15 text-amber-300 border-amber-500/30', icon: '🟡' },
+    'LOW': { label: 'LOW', bg: 'bg-slate-800 text-slate-400 border-slate-700', icon: '⚪' },
+  };
+
+  const current = configs[lvl] || configs.LOW;
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold tracking-wide border ${current.bg}`}>
+      <span>{current.icon}</span>
+      <span>{current.label}</span>
+    </span>
+  );
+}
+
+export function ThreatIntelCell({ threatLevel, inKev, epssScore, hasExploit = false }) {
+  const epssPct = epssScore != null ? (epssScore * 100).toFixed(1) + '%' : null;
+
+  return (
+    <div className="flex flex-col gap-1 items-start">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <ThreatLevelBadge level={threatLevel} inKev={inKev} />
+        {inKev && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-950/80 text-rose-400 border border-rose-800/60" title="Listed in CISA Known Exploited Vulnerabilities Catalog">
+            KEV ✓
+          </span>
+        )}
+        {hasExploit && (
+          <span title="Public exploit code references available" className="text-xs cursor-help">
+            🧨
+          </span>
+        )}
+      </div>
+      {epssPct && (
+        <span className="text-[10px] font-mono text-slate-400">
+          EPSS: <span className={Number(epssScore) >= 0.5 ? 'text-rose-400 font-bold' : Number(epssScore) >= 0.1 ? 'text-amber-400 font-semibold' : 'text-slate-400'}>{epssPct}</span>
+        </span>
+      )}
+    </div>
+  );
+}

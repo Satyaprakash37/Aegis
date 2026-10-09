@@ -114,6 +114,19 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
+    # Actively Exploited (KEV) count of open/in-progress vulns
+    kev_open_count = (
+        await db.execute(
+            select(func.count(Vulnerability.id))
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(
+                Asset.owner_id == current_user.id,
+                Vulnerability.in_kev == True,
+                Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
+            )
+        )
+    ).scalar_one()
+
     return {
         "status": "success",
         "data": {
@@ -123,6 +136,7 @@ async def get_dashboard_summary(
             "mitigated_vulns": mitigated_vulns,
             "critical_high_count": crit_high_count,
             "verified_dangerous_count": verified_dangerous_count,
+            "kev_open_count": kev_open_count,
             "scans_run_30d": scans_30d,
         },
     }
