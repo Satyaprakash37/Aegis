@@ -1,10 +1,8 @@
 """Asset model definition and categorization enums."""
 
 import enum
-from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -28,7 +26,6 @@ class AssetEnvironment(str, enum.Enum):
     production = "production"
     staging = "staging"
     dev = "dev"
-    lab = "lab"
 
 
 class TargetType(str, enum.Enum):
@@ -72,15 +69,6 @@ class Asset(Base, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     auto_created: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     is_seed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
-    is_lab: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
-    attack_surface_report: Mapped[Optional[dict]] = mapped_column(
-        JSONB(astext_type=Text()),
-        nullable=True,
-    )
-    report_generated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
 
     # Relationships
     owner_user: Mapped[Optional["User"]] = relationship("User", back_populates="assets")

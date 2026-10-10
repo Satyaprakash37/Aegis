@@ -8,11 +8,8 @@ import {
   ShieldAlert, 
   Activity, 
   FileText,
-  Cpu,
-  Bot,
-  Terminal
+  Cpu
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
 
 export default function Sidebar() {
   const location = useLocation();
@@ -36,13 +33,10 @@ export default function Sidebar() {
     return () => clearInterval(interval);
   }, []);
 
-  const { user } = useAuth();
-
   const navItems = [
     { id: 'dashboard', path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'assets', path: '/assets', label: 'Assets', icon: Server },
     { id: 'vulnerabilities', path: '/vulns', label: 'Vulnerabilities', icon: ShieldAlert, badge: criticalHighCount },
-    ...(user?.role !== 'viewer' ? [{ id: 'console', path: '/console', label: '🛰️ Red Team Console', icon: Terminal, badge: 'v2.0' }] : []),
     { id: 'scans', path: '/scans', label: 'Scans', icon: Activity },
     { id: 'reports', path: '/reports', label: 'Reports', icon: FileText },
   ];

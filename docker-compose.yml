@@ -16,8 +16,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - default
 
   backend:
     build:
@@ -38,11 +36,6 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       - SUBFINDER_VIRUSTOTAL_KEY=${SUBFINDER_VIRUSTOTAL_KEY:-}
       - SUBFINDER_SECURITYTRAILS_KEY=${SUBFINDER_SECURITYTRAILS_KEY:-}
-      - MSF_RPC_HOST=metasploit
-      - MSF_RPC_PORT=55553
-      - MSF_RPC_PASSWORD=${MSF_RPC_PASSWORD:-aegis_lab_msf_rpc_secret_55553}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - COPILOT_MODEL=${COPILOT_MODEL:-gemini-2.0-flash}
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,9 +44,6 @@ services:
       - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
       - ./backend/scripts:/app/scripts
-    networks:
-      - default
-      - aegis-lab-net
 
   frontend:
     build:
@@ -68,8 +58,6 @@ services:
       - 1.1.1.1
     depends_on:
       - backend
-    networks:
-      - default
 
   vulnerable-target:
     image: bkimminich/juice-shop:latest
@@ -77,9 +65,6 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3000"
-    networks:
-      - default
-      - aegis-lab-net
 
   proxy-target:
     image: nginx:alpine
@@ -91,70 +76,6 @@ services:
       - ./nginx-proxy.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - vulnerable-target
-    networks:
-      - default
-
-  metasploit:
-    image: metasploitframework/metasploit-framework:latest
-    container_name: aegis-metasploit
-    restart: unless-stopped
-    environment:
-      MSF_RPC_PASSWORD: ${MSF_RPC_PASSWORD:-aegis_lab_msf_rpc_secret_55553}
-    command: >
-      sh -c './msfrpcd -P "$${MSF_RPC_PASSWORD}" -S -a 0.0.0.0 -p 55553 -n -f'
-    expose:
-      - "55553"
-    networks:
-      - default
-      - aegis-lab-net
-    volumes:
-      - msf_data:/home/msf/.msf4
-
-  lab-mysql:
-    image: mysql:5.7
-    container_name: aegis-lab-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${LAB_MYSQL_ROOT_PASSWORD:-lab_mysql_root_secret}
-      MYSQL_DATABASE: wordpress
-      MYSQL_USER: wordpress
-      MYSQL_PASSWORD: ${LAB_MYSQL_PASSWORD:-lab_wp_secret_pass}
-    networks:
-      - aegis-lab-net
-    volumes:
-      - lab_mysql_data:/var/lib/mysql
-
-  lab-wordpress:
-    image: wordpress:5.4-php7.2-apache
-    container_name: aegis-lab-wordpress
-    restart: unless-stopped
-    environment:
-      WORDPRESS_DB_HOST: lab-mysql:3306
-      WORDPRESS_DB_NAME: wordpress
-      WORDPRESS_DB_USER: wordpress
-      WORDPRESS_DB_PASSWORD: ${LAB_MYSQL_PASSWORD:-lab_wp_secret_pass}
-    depends_on:
-      - lab-mysql
-    networks:
-      - aegis-lab-net
-    volumes:
-      - lab_wp_data:/var/www/html
-
-  lab-dvwa:
-    image: vulnerables/web-dvwa:latest
-    container_name: aegis-lab-dvwa
-    restart: unless-stopped
-    networks:
-      - aegis-lab-net
-
-networks:
-  default:
-    driver: bridge
-  aegis-lab-net:
-    driver: bridge
 
 volumes:
   postgres_data:
-  msf_data:
-  lab_mysql_data:
-  lab_wp_data:

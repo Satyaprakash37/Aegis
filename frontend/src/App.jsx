@@ -9,9 +9,6 @@ import Assets from './pages/Assets';
 import Scans from './pages/Scans';
 import Vulnerabilities from './pages/Vulnerabilities';
 import Reports from './pages/Reports';
-import CopilotTest from './pages/CopilotTest';
-import AssetIntel from './pages/AssetIntel';
-import Console from './pages/Console';
 import NotFound from './pages/NotFound';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -28,17 +25,11 @@ function PageTitleUpdater() {
       '/vulns': 'AEGIS | Vulnerability Register',
       '/vulnerabilities': 'AEGIS | Vulnerability Register',
       '/reports': 'AEGIS | Compliance & Audit Reports',
-      '/console': 'AEGIS | Red Team Operations Console',
-      '/copilot-test': 'AEGIS | Red Team Operations Console',
       '/login': 'AEGIS | Authentication Portal',
       '/register': 'AEGIS | Analyst Registration',
     };
 
-    if (location.pathname.includes('/intel')) {
-      document.title = 'AEGIS | Attack Surface Intelligence';
-    } else {
-      document.title = titles[location.pathname] || 'AEGIS | Vulnerability Management Platform';
-    }
+    document.title = titles[location.pathname] || 'AEGIS | Vulnerability Management Platform';
   }, [location]);
 
   return null;
@@ -98,13 +89,10 @@ export default function App() {
             >
               <Route index element={<Dashboard />} />
               <Route path="assets" element={<Assets />} />
-              <Route path="assets/:id/intel" element={<AssetIntel />} />
               <Route path="scans" element={<Scans />} />
               <Route path="vulns" element={<Vulnerabilities />} />
               <Route path="vulnerabilities" element={<Vulnerabilities />} />
               <Route path="reports" element={<Reports />} />
-              <Route path="console" element={<Console />} />
-              <Route path="copilot-test" element={<Navigate to="/console" replace />} />
             </Route>
             <Route path="/404" element={<NotFound />} />
             <Route path="*" element={<NotFound />} />

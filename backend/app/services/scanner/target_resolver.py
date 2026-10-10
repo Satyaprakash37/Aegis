@@ -17,11 +17,6 @@ HOSTNAME_REGEX = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$"
 )
 
-# Single-label Docker/internal container hostname regex (e.g. lab-wordpress, lab-dvwa)
-INTERNAL_HOST_REGEX = re.compile(
-    r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$"
-)
-
 # Prohibited shell metacharacters for command injection defense
 DANGEROUS_SHELL_CHARS = re.compile(r"[;`$|&><\n\r\t{}()\\\"']")
 
@@ -167,11 +162,8 @@ def resolve_target(input_string: Optional[str]) -> Dict[str, Any]:
     except ValueError:
         pass
 
-    # Validate hostname / domain format (supports internet FQDNs and internal docker container hostnames)
-    is_fqdn = bool(HOSTNAME_REGEX.match(cleaned_lower))
-    is_internal_host = bool(INTERNAL_HOST_REGEX.match(cleaned_lower))
-
-    if len(cleaned_lower) > 253 or (not is_fqdn and not is_internal_host):
+    # Validate hostname / domain format
+    if len(cleaned_lower) > 253 or not HOSTNAME_REGEX.match(cleaned_lower):
         return {
             "type": "invalid",
             "ip": None,

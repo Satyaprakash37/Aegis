@@ -15,12 +15,10 @@ import {
   SlidersHorizontal,
   X,
   AlertTriangle,
-  Loader2,
-  Sparkles
+  Loader2
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import api from '../api/client';
-import { CriticalityBadge, EnvironmentBadge, LabBadge } from '../components/Badge';
+import { CriticalityBadge, EnvironmentBadge } from '../components/Badge';
 import AssetModal from '../components/AssetModal';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
 import Toast from '../components/Toast';
@@ -269,7 +267,6 @@ export default function Assets() {
             <option value="production">Production</option>
             <option value="staging">Staging</option>
             <option value="dev">Development</option>
-            <option value="lab">Lab Environment</option>
           </select>
 
           {/* Criticality */}
@@ -387,7 +384,6 @@ export default function Assets() {
                         <span className="font-semibold text-slate-200 group-hover:text-cyan-300 transition-colors">
                           {asset.name}
                         </span>
-                        {asset.is_lab && <LabBadge />}
                         {asset.auto_created && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                             AUTO
@@ -454,14 +450,6 @@ export default function Assets() {
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="inline-flex items-center gap-1.5">
-                        <Link
-                          to={`/assets/${asset.id}/intel`}
-                          title="Attack Surface Intel"
-                          className="px-2 py-1 rounded bg-purple-950/40 border border-purple-800/40 hover:bg-purple-900/50 text-purple-300 hover:text-purple-100 text-[11px] font-mono font-medium flex items-center gap-1 transition-colors"
-                        >
-                          <Sparkles className="w-3 h-3 text-purple-400" />
-                          <span>Intel</span>
-                        </Link>
                         <button
                           onClick={() => setEditingAsset(asset)}
                           title="Edit Asset"

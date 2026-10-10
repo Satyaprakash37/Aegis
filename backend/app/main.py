@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-from app.api.routes import agent, assets, auth, copilot, dashboard, health, notifications, operator, reports, scans, threat_intel, vulns
+from app.api.routes import assets, auth, dashboard, health, notifications, reports, scans, vulns
 from app.core.config import settings
 from app.core.limiter import limiter
 
@@ -72,18 +72,6 @@ async def lifespan(app: FastAPI):
                 logger.info("Recovered %d orphaned scan(s) cleanly.", len(stuck_scans))
     except Exception as e:
         logger.error("Failed to run startup stuck-scan recovery: %s", e)
-
-    # Gemini Copilot initialization & connection diagnostic
-    if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY.strip():
-        logger.info("AI Operations Copilot: GEMINI_API_KEY configured (Model: %s). Initializing...", settings.COPILOT_MODEL)
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            logger.info("AI Operations Copilot: Gemini client initialized successfully.")
-        except Exception as e:
-            logger.warning("AI Operations Copilot: Failed to initialize Gemini client: %s", e)
-    else:
-        logger.info("AI Operations Copilot: GEMINI_API_KEY not configured. Copilot routes will return 503 until configured.")
 
     logger.info("Security hardening verified. Platform ready.")
     yield
@@ -200,7 +188,3 @@ app.include_router(vulns.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
-app.include_router(agent.router, prefix="/api")
-app.include_router(threat_intel.router, prefix="/api")
-app.include_router(copilot.router, prefix="/api")
-app.include_router(operator.router, prefix="/api")

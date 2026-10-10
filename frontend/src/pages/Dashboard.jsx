@@ -183,7 +183,7 @@ export default function Dashboard() {
       </div>
 
       {/* Row 1: KPI Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Card 1: Total Vulnerabilities */}
         <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md relative overflow-hidden group hover:border-slate-700 transition-colors">
           <div className="flex items-center justify-between">
@@ -237,36 +237,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Card 3: Actively Exploited (KEV) */}
-        <div className={`p-5 rounded-xl border backdrop-blur-md relative overflow-hidden group transition-all ${
-          (summary?.kev_open_count || 0) > 0
-            ? 'border-red-500/50 bg-gradient-to-b from-red-950/30 to-slate-950/80 shadow-[0_0_25px_rgba(239,68,68,0.18)]'
-            : 'border-slate-800 bg-slate-950/70'
-        }`}>
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase tracking-wider text-red-400 font-semibold flex items-center gap-1.5">
-              <span className="text-sm">🔴</span>
-              <span>Actively Exploited (KEV)</span>
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 font-bold font-mono text-xs">
-              KEV
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-bold font-mono text-red-400 tracking-tight">
-              {loading ? (
-                <div className="h-8 w-16 bg-slate-800 animate-pulse rounded" />
-              ) : (
-                <AnimatedNumber value={summary?.kev_open_count || 0} />
-              )}
-            </div>
-            <p className="text-[11px] text-red-400/80 mt-1 font-mono">
-              In CISA Active Exploit Catalog
-            </p>
-          </div>
-        </div>
-
-        {/* Card 4: Verified Dangerous Vulns */}
+        {/* Card 3: Verified Dangerous Vulns */}
         <div className={`p-5 rounded-xl border backdrop-blur-md relative overflow-hidden group transition-all ${
           (summary?.verified_dangerous_count || 0) > 0
             ? 'border-amber-500/40 bg-gradient-to-b from-amber-950/20 to-slate-950/70 shadow-[0_0_25px_rgba(245,158,11,0.12)]'
@@ -295,7 +266,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Card 5: Assets Monitored */}
+        {/* Card 4: Assets Monitored */}
         <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md relative overflow-hidden group hover:border-slate-700 transition-colors">
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono uppercase tracking-wider text-slate-400">Assets Monitored</span>
@@ -317,7 +288,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Card 6: Scans Run (30d) */}
+        {/* Card 5: Scans Run (30d) */}
         <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 backdrop-blur-md relative overflow-hidden group hover:border-slate-700 transition-colors">
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono uppercase tracking-wider text-slate-400">Scans Run (30d)</span>

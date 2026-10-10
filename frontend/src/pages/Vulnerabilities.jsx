@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { 
   ShieldAlert, 
   Search, 
@@ -29,9 +29,7 @@ import {
   VulnStatusBadge, 
   RiskTierBadge,
   VerificationBadge,
-  DangerScoreBadge,
-  ThreatIntelCell,
-  ThreatLevelBadge,
+  DangerScoreBadge 
 } from '../components/Badge';
 import Toast from '../components/Toast';
 
@@ -306,7 +304,6 @@ export default function Vulnerabilities() {
             <thead>
               <tr className="border-b border-slate-800/80 bg-slate-950 text-slate-400 font-mono text-[11px] uppercase tracking-wider select-none">
                 <th className="py-3 px-4">CVE ID</th>
-                <th className="py-3 px-4">Threat Intel</th>
                 <th className="py-3 px-4">Verification</th>
                 <th 
                   className="py-3 px-4 cursor-pointer hover:text-slate-200 transition-colors"
@@ -355,7 +352,6 @@ export default function Vulnerabilities() {
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
                     <td className="py-3.5 px-4"><div className="h-4 w-28 bg-slate-800 rounded" /></td>
-                    <td className="py-3.5 px-4"><div className="h-4 w-28 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-16 bg-slate-800 rounded" /></td>
                     <td className="py-3.5 px-4"><div className="h-4 w-24 bg-slate-800 rounded" /></td>
@@ -369,7 +365,7 @@ export default function Vulnerabilities() {
                 ))
               ) : vulns.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-slate-500">
+                  <td colSpan={10} className="py-12 text-center text-slate-500">
                     <ShieldAlert className="w-8 h-8 mx-auto mb-2 text-slate-600 opacity-50" />
                     <p className="font-medium text-slate-400">No vulnerabilities recorded</p>
                     <p className="text-xs text-slate-600 mt-0.5">
@@ -394,16 +390,6 @@ export default function Vulnerabilities() {
                           </span>
                         )}
                       </div>
-                    </td>
-
-                    {/* Threat Intel (KEV + EPSS + Exploit Intelligence) */}
-                    <td className="py-3.5 px-4">
-                      <ThreatIntelCell
-                        threatLevel={v.threat_level}
-                        inKev={v.in_kev}
-                        epssScore={v.epss_score}
-                        hasExploit={Boolean(v.exploit_refs?.public_exploit_available || v.public_exploit)}
-                      />
                     </td>
 
                     {/* Verification */}
@@ -582,31 +568,6 @@ export default function Vulnerabilities() {
 
             {/* Body */}
             <div className="p-6 space-y-5 overflow-y-auto">
-              {/* Lab Attack Simulation Hint */}
-              {selectedVuln.asset_is_lab && (
-                <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-800/40 flex items-center justify-between gap-3 animate-in fade-in">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-lg">🧪</span>
-                    <div>
-                      <div className="text-xs font-mono font-bold text-purple-300">
-                        Attack simulation available
-                      </div>
-                      <div className="text-[11px] text-purple-400/80 font-sans">
-                        Isolated lab target in aegis-lab-net. Controlled exploit validation enabled.
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    disabled
-                    title="coming in v2.0"
-                    className="px-3 py-1.5 rounded-lg bg-purple-900/40 text-purple-400 border border-purple-700/40 text-xs font-mono opacity-60 cursor-not-allowed flex items-center gap-1.5 shrink-0"
-                  >
-                    <span>Simulate Attack</span>
-                    <span className="text-[10px] bg-purple-950 px-1.5 py-0.5 rounded border border-purple-800/50">coming in v2.0</span>
-                  </button>
-                </div>
-              )}
-
               {/* Danger Assessment Engine Card */}
               <div className="p-4 rounded-xl bg-gradient-to-b from-rose-950/20 via-slate-950 to-slate-950 border border-rose-500/30 space-y-3">
                 <div className="flex items-center justify-between">
@@ -643,134 +604,6 @@ export default function Vulnerabilities() {
                     </p>
                   </div>
                 </div>
-              </div>
-
-              {/* Threat Intelligence (CISA KEV + FIRST EPSS + Exploit Intelligence) */}
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-                  <div className="flex items-center gap-2 text-xs font-mono font-semibold text-white uppercase tracking-wider">
-                    <span className="text-base">🛡️</span>
-                    <span>Threat Intelligence Feeds (CISA KEV + FIRST EPSS)</span>
-                  </div>
-                  <ThreatLevelBadge level={selectedVuln.threat_level} inKev={selectedVuln.in_kev} />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                  {/* CISA KEV Card */}
-                  <div className={`p-3 rounded-lg border ${
-                    selectedVuln.in_kev 
-                      ? 'bg-rose-950/20 border-rose-800/40' 
-                      : 'bg-slate-900/60 border-slate-800/80'
-                  }`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono uppercase text-[10px] font-semibold text-slate-400 flex items-center gap-1.5">
-                        <span className="text-sm">🏛️</span>
-                        <span>CISA KEV Catalog</span>
-                      </span>
-                      {selectedVuln.in_kev ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                          LISTED IN KEV ✓
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono text-slate-500 bg-slate-800/60 border border-slate-700/60">
-                          Not Listed
-                        </span>
-                      )}
-                    </div>
-                    {selectedVuln.in_kev ? (
-                      <div className="space-y-1.5 text-[11px] font-sans">
-                        <p className="text-rose-200 font-medium">
-                          Actively exploited vulnerability tracked by U.S. Cybersecurity and Infrastructure Security Agency.
-                        </p>
-                        {selectedVuln.exploit_refs?.kev?.entry && (
-                          <div className="space-y-1 text-slate-300 font-mono text-[10px] pt-1">
-                            {selectedVuln.exploit_refs.kev.entry.date_added && (
-                              <div>Date Added: <span className="text-slate-100">{selectedVuln.exploit_refs.kev.entry.date_added}</span></div>
-                            )}
-                            {selectedVuln.exploit_refs.kev.entry.known_ransomware_campaign_use && (
-                              <div>Ransomware Vector: <span className="text-rose-400 font-bold uppercase">{selectedVuln.exploit_refs.kev.entry.known_ransomware_campaign_use}</span></div>
-                            )}
-                            {selectedVuln.exploit_refs.kev.entry.required_action && (
-                              <div className="text-slate-400 font-sans text-[10px] line-clamp-2">Action: {selectedVuln.exploit_refs.kev.entry.required_action}</div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-slate-500 text-[11px] font-sans leading-relaxed">
-                        No confirmed broad exploitation campaigns reported in CISA Known Exploited Vulnerabilities catalog.
-                      </p>
-                    )}
-                  </div>
-
-                  {/* FIRST EPSS Card */}
-                  <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800/80">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono uppercase text-[10px] font-semibold text-slate-400 flex items-center gap-1.5">
-                        <span className="text-sm">📊</span>
-                        <span>FIRST EPSS Scoring</span>
-                      </span>
-                      {selectedVuln.epss_score != null ? (
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                          selectedVuln.epss_score >= 0.5 
-                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' 
-                            : selectedVuln.epss_score >= 0.1 
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
-                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                        }`}>
-                          {(selectedVuln.epss_score * 100).toFixed(2)}% Prob
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono text-slate-500 bg-slate-800/60">
-                          N/A
-                        </span>
-                      )}
-                    </div>
-                    {selectedVuln.epss_score != null ? (
-                      <div className="space-y-1 text-[11px]">
-                        <p className="text-slate-300 font-sans">
-                          Likelihood of exploitation in the wild: <span className="font-semibold text-white">
-                            {selectedVuln.epss_score >= 0.5 ? 'Very Likely Exploited' : selectedVuln.epss_score >= 0.1 ? 'Elevated Likelihood' : 'Low Likelihood'}
-                          </span>
-                        </p>
-                        <p className="text-[10px] font-mono text-slate-400">
-                          EPSS percentile: {selectedVuln.exploit_refs?.epss?.epss_percentile ? (selectedVuln.exploit_refs.epss.epss_percentile * 100).toFixed(1) + 'th percentile' : 'Telemetry verified'}
-                        </p>
-                      </div>
-                    ) : (
-                      <p className="text-slate-500 text-[11px] font-sans">
-                        EPSS probability model has not scored this finding or CVE format is not recognized.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Exploit Documentation References */}
-                {selectedVuln.exploit_refs?.refs && selectedVuln.exploit_refs.refs.length > 0 && (
-                  <div className="pt-2 border-t border-slate-800/60">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block mb-2 font-semibold flex items-center gap-1.5">
-                      <span>🔗</span>
-                      <span>Public Exploit & Documentation References ({selectedVuln.exploit_refs.refs.length})</span>
-                    </span>
-                    <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
-                      {selectedVuln.exploit_refs.refs.map((ref, idx) => (
-                        <a
-                          key={idx}
-                          href={ref.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-900 border border-slate-800 text-[11px] font-mono text-cyan-400 hover:text-cyan-300 hover:border-slate-700 transition-colors"
-                        >
-                          <span className="px-1 py-0.2 rounded text-[9px] uppercase font-bold bg-slate-800 text-slate-300">
-                            {ref.type}
-                          </span>
-                          <span className="truncate max-w-[220px]">{ref.url.replace(/^https?:\/\//, '')}</span>
-                          <ExternalLink className="w-3 h-3 text-slate-500 shrink-0" />
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Active Verification Evidence & Proof */}
@@ -899,14 +732,7 @@ export default function Vulnerabilities() {
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between gap-3">
-              <Link
-                to={`/console?asset_id=${selectedVuln.asset_id}&cve=${selectedVuln.cve_id}`}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-950/60 border border-teal-800/60 hover:bg-teal-900/60 text-teal-300 hover:text-teal-100 font-mono text-xs font-semibold transition-all shadow-sm shadow-teal-950/40"
-              >
-                <Terminal className="w-3.5 h-3.5" />
-                <span>Log operator action for this finding</span>
-              </Link>
+            <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex justify-end">
               <button
                 onClick={() => setSelectedVuln(null)}
                 className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono text-xs transition-colors cursor-pointer"
