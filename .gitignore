@@ -57,3 +57,8 @@ backend/reports/*.xlsx
 reports/*.pdf
 reports/*.xlsx
 !backend/reports/.gitkeep
+
+# Video output and frames
+*.mp4
+video_frames/
+*.mov
