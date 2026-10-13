@@ -313,45 +313,103 @@ for f in range(TOTAL_FRAMES):
 
         draw_top_cyber_bar(draw, "[ PROJECT ARCHITECTURE ]")
 
-        if out_sec < 10.0:
-            p = out_sec / 10.0
-            alpha = int(255 * (ease_in_out(min(1.0, p * 2.0)) if p < 0.85 else max(0.0, (1.0 - p) * 6.0)))
+        if out_sec < 5.0:
+            # 45.0s - 50.0s: Creator introduction & Open Source milestone
+            p = out_sec / 5.0
+            alpha = int(255 * (ease_in_out(min(1.0, p * 2.5)) if p < 0.8 else max(0.0, (1.0 - p) * 5.0)))
 
             # Logo & Brand Name
-            draw.text((WIDTH//2 - 200, 200), "🛡️  A E G I S", font=FONTS["title_large"], fill=(6, 182, 212, alpha))
+            draw.text((WIDTH//2 - 200, 220), "🛡️  A E G I S", font=FONTS["title_large"], fill=(6, 182, 212, alpha))
             
             tag = "OPEN SOURCE CYBERSECURITY PLATFORM"
             t_bbox = draw.textbbox((0, 0), tag, font=FONTS["badge_label"])
             tw = t_bbox[2] - t_bbox[0]
-            draw.text(((WIDTH - tw)//2, 300), tag, font=FONTS["badge_label"], fill=(148, 163, 184, alpha))
-
-            # GitHub URL Card
-            gh_rect = [WIDTH//2 - 520, 370, WIDTH//2 + 520, 480]
-            draw.rounded_rectangle(gh_rect, radius=18, fill=(15, 23, 42, int(alpha * 0.9)), outline=(6, 182, 212, alpha), width=2)
-            gh_url = "github.com/Satyaprakash37/Aegis"
-            u_bbox = draw.textbbox((0, 0), gh_url, font=FONTS["mono_url"])
-            uw = u_bbox[2] - u_bbox[0]
-            draw.text(((WIDTH - uw)//2, 400), gh_url, font=FONTS["mono_url"], fill=(255, 255, 255, alpha))
+            draw.text(((WIDTH - tw)//2, 320), tag, font=FONTS["badge_label"], fill=(148, 163, 184, alpha))
 
             # Creator Badge
-            credit = "Designed & Built from Scratch by SatyaPrakash Sahu"
+            credit = "Designed & Built by SatyaPrakash Sahu"
             c_bbox = draw.textbbox((0, 0), credit, font=FONTS["headline"])
             cw = c_bbox[2] - c_bbox[0]
-            draw.text(((WIDTH - cw)//2, 540), credit, font=FONTS["headline"], fill=(203, 213, 225, alpha))
+            draw.text(((WIDTH - cw)//2, 450), credit, font=FONTS["headline"], fill=(255, 255, 255, alpha))
 
             tech_stack = "FastAPI · PostgreSQL · React 18 · TailwindCSS · Nmap · Nuclei · Docker"
             ts_bbox = draw.textbbox((0, 0), tech_stack, font=FONTS["body"])
             tsw = ts_bbox[2] - ts_bbox[0]
-            draw.text(((WIDTH - tsw)//2, 620), tech_stack, font=FONTS["body"], fill=(100, 116, 139, alpha))
+            draw.text(((WIDTH - tsw)//2, 540), tech_stack, font=FONTS["body"], fill=(100, 116, 139, alpha))
+
+            sub_open = "Sab documented. 100% Free & Open Source."
+            so_bbox = draw.textbbox((0, 0), sub_open, font=FONTS["body"])
+            sow = so_bbox[2] - so_bbox[0]
+            draw.text(((WIDTH - sow)//2, 630), sub_open, font=FONTS["body"], fill=(6, 182, 212, alpha))
+
+        elif out_sec < 11.5:
+            # 50.0s - 56.5s: PROMINENT GITHUB LINK OVERLAY CARD (Task 2)
+            # The voiceover speaks "Link description mein"
+            p = (out_sec - 5.0) / 6.5
+            fade_in = ease_in_out(min(1.0, p * 3.5))
+            fade_out = 1.0 if p < 0.85 else max(0.0, (1.0 - p) * 6.66)
+            alpha = int(255 * fade_in * fade_out)
+
+            # Subtle breathing glow/pulse effect on border & accent
+            pulse = math.sin((out_sec - 5.0) * 4.0) * 0.5 + 0.5  # 0.0 to 1.0 oscillation
+            glow_intensity = int(180 + pulse * 75)
+            glow_color = (6, glow_intensity, 212, alpha)
+
+            # Prominent Centered GitHub Card
+            card_w = 1160
+            card_h = 520
+            card_x1 = (WIDTH - card_w) // 2
+            card_y1 = 260
+            card_x2 = card_x1 + card_w
+            card_y2 = card_y1 + card_h
+
+            # Outer subtle glow box
+            draw.rounded_rectangle([card_x1 - 6, card_y1 - 6, card_x2 + 6, card_y2 + 6], radius=28, outline=(6, 182, 212, int(alpha * 0.35 * (0.6 + 0.4 * pulse))), width=3)
+            # Main dark container
+            draw.rounded_rectangle([card_x1, card_y1, card_x2, card_y2], radius=24, fill=(10, 15, 29, int(alpha * 0.95)), outline=glow_color, width=3)
+
+            # Card Header: 🛡️  A E G I S
+            brand = "🛡️  A E G I S"
+            b_bbox = draw.textbbox((0, 0), brand, font=FONTS["title_large"])
+            bw = b_bbox[2] - b_bbox[0]
+            draw.text(((WIDTH - bw)//2, card_y1 + 45), brand, font=FONTS["title_large"], fill=(255, 255, 255, alpha))
+
+            # Sub-header: Official Open Source Repository
+            repo_lbl = "OFFICIAL OPEN-SOURCE REPOSITORY"
+            rl_bbox = draw.textbbox((0, 0), repo_lbl, font=FONTS["badge_label"])
+            rlw = rl_bbox[2] - rl_bbox[0]
+            draw.text(((WIDTH - rlw)//2, card_y1 + 135), repo_lbl, font=FONTS["badge_label"], fill=(148, 163, 184, alpha))
+
+            # GitHub URL Highlight Box
+            url_box = [card_x1 + 60, card_y1 + 185, card_x2 - 60, card_y1 + 300]
+            draw.rounded_rectangle(url_box, radius=16, fill=(15, 23, 42, alpha), outline=(6, 182, 212, int(alpha * 0.8)), width=2)
+            gh_url = "github.com/Satyaprakash37/Aegis"
+            u_bbox = draw.textbbox((0, 0), gh_url, font=FONTS["mono_url"])
+            uw = u_bbox[2] - u_bbox[0]
+            draw.text(((WIDTH - uw)//2, card_y1 + 218), gh_url, font=FONTS["mono_url"], fill=(6, glow_intensity, 212, alpha))
+
+            # Divider line inside card
+            draw.line([(card_x1 + 160, card_y1 + 350), (card_x2 - 160, card_y1 + 350)], fill=(30, 41, 59, alpha), width=2)
+
+            # Motto: Detect nahi. Verify.
+            motto = "Detect nahi. Verify."
+            m_bbox = draw.textbbox((0, 0), motto, font=FONTS["headline"])
+            mw = m_bbox[2] - m_bbox[0]
+            draw.text(((WIDTH - mw)//2, card_y1 + 385), motto, font=FONTS["headline"], fill=(255, 255, 255, alpha))
+
+            # Footnote: Link description mein
+            desc_hint = "📌 Link description mein available hai"
+            dh_bbox = draw.textbbox((0, 0), desc_hint, font=FONTS["body"])
+            dhw = dh_bbox[2] - dh_bbox[0]
+            draw.text(((WIDTH - dhw)//2, card_y1 + 445), desc_hint, font=FONTS["body"], fill=(203, 213, 225, alpha))
 
         else:
-            # Final 5 seconds (55s - 60s): Fade to Black + Final Motto
-            p = (out_sec - 10.0) / 5.0
-            # Fade in then gently fade to black at 59s
-            if p < 0.7:
-                alpha = int(255 * ease_in_out(min(1.0, p * 2.0)))
+            # 56.5s - 60.0s: Final 3.5 seconds - Fade to "STAY SECURE 🛡️" Finale Card
+            p = (out_sec - 11.5) / 3.5
+            if p < 0.65:
+                alpha = int(255 * ease_in_out(min(1.0, p * 2.5)))
             else:
-                alpha = int(255 * max(0.0, (1.0 - p) * 3.33))
+                alpha = int(255 * max(0.0, (1.0 - p) * 2.85))
 
             final_motto = "STAY SECURE  🛡️"
             fm_bbox = draw.textbbox((0, 0), final_motto, font=FONTS["title_large"])
