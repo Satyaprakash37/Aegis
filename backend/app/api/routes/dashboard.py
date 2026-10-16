@@ -1,8 +1,8 @@
 """Executive dashboard analytics and metrics reporting endpoints."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Dict, List
-from fastapi import APIRouter, Depends
+from typing import Annotated, Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, select, literal_column, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -23,15 +23,141 @@ from app.services.risk.engine import get_risk_tier
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
+async def _verify_asset_ownership(db: AsyncSession, asset_id: int, user_id: int) -> Asset:
+    """Verify that the target asset exists and is owned by the current user."""
+    asset = (
+        await db.execute(
+            select(Asset).where(Asset.id == asset_id, Asset.owner_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset #{asset_id} not found or unauthorized",
+        )
+    return asset
+
+
 @router.get("/summary")
 async def get_dashboard_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    asset_id: Optional[int] = Query(None, description="Scope summary to a specific asset"),
 ) -> Dict[str, Any]:
-    """Retrieve top-level operational cybersecurity KPI metrics."""
+    """Retrieve top-level operational cybersecurity KPI metrics, optionally scoped to a single asset."""
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
-    # Asset count (owned assets + shared seed demo assets)
+    selected_asset_data = None
+    latest_scan_data = None
+
+    if asset_id is not None:
+        asset = await _verify_asset_ownership(db, asset_id, current_user.id)
+        total_assets = 1
+
+        selected_asset_data = {
+            "id": asset.id,
+            "name": asset.name,
+            "ip_address": asset.ip_address,
+            "target_type": asset.target_type.value if hasattr(asset.target_type, "value") else str(asset.target_type),
+            "criticality": asset.criticality,
+        }
+
+        # Asset-scoped vulnerability queries
+        total_vulns = (
+            await db.execute(
+                select(func.count(Vulnerability.id)).where(Vulnerability.asset_id == asset_id)
+            )
+        ).scalar_one()
+
+        open_vulns = (
+            await db.execute(
+                select(func.count(Vulnerability.id)).where(
+                    Vulnerability.asset_id == asset_id,
+                    Vulnerability.status == VulnerabilityStatus.open,
+                )
+            )
+        ).scalar_one()
+
+        mitigated_vulns = (
+            await db.execute(
+                select(func.count(Vulnerability.id)).where(
+                    Vulnerability.asset_id == asset_id,
+                    Vulnerability.status == VulnerabilityStatus.mitigated,
+                )
+            )
+        ).scalar_one()
+
+        crit_high_count = (
+            await db.execute(
+                select(func.count(Vulnerability.id)).where(
+                    Vulnerability.asset_id == asset_id,
+                    Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
+                    Vulnerability.severity.in_([VulnerabilitySeverity.critical, VulnerabilitySeverity.high]),
+                )
+            )
+        ).scalar_one()
+
+        verified_dangerous_count = (
+            await db.execute(
+                select(func.count(Vulnerability.id)).where(
+                    Vulnerability.asset_id == asset_id,
+                    Vulnerability.danger_score > 6.0,
+                    Vulnerability.verification.in_([
+                        VerificationType.nse_verified,
+                        VerificationType.nuclei_verified,
+                        VerificationType.ssl_verified,
+                    ]),
+                    Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
+                )
+            )
+        ).scalar_one()
+
+        scans_30d = (
+            await db.execute(
+                select(func.count(Scan.id)).where(
+                    Scan.asset_id == asset_id,
+                    Scan.created_by == current_user.id,
+                    Scan.started_at >= thirty_days_ago,
+                )
+            )
+        ).scalar_one()
+
+        # Query latest scan for this specific asset
+        latest_scan_query = (
+            select(Scan)
+            .where(Scan.asset_id == asset_id, Scan.created_by == current_user.id)
+            .order_by(Scan.started_at.desc().nullslast(), Scan.id.desc())
+            .limit(1)
+        )
+        latest_scan = (await db.execute(latest_scan_query)).scalar_one_or_none()
+        if latest_scan:
+            latest_scan_data = {
+                "id": latest_scan.id,
+                "status": latest_scan.status.value,
+                "scan_type": latest_scan.scan_type.value if hasattr(latest_scan.scan_type, "value") else str(latest_scan.scan_type),
+                "started_at": latest_scan.started_at.isoformat() if latest_scan.started_at else None,
+                "completed_at": latest_scan.completed_at.isoformat() if latest_scan.completed_at else None,
+                "total_vulns_found": latest_scan.total_vulns_found,
+                "scan_findings_count": latest_scan.total_vulns_found,
+            }
+
+        return {
+            "status": "success",
+            "data": {
+                "scope": "asset",
+                "total_assets": total_assets,
+                "total_vulnerabilities": total_vulns,
+                "open_vulns": open_vulns,
+                "mitigated_vulns": mitigated_vulns,
+                "critical_high_count": crit_high_count,
+                "verified_dangerous_count": verified_dangerous_count,
+                "scans_run_30d": scans_30d,
+                "selected_asset": selected_asset_data,
+                "latest_scan": latest_scan_data,
+            },
+        }
+
+    # Account-wide metrics (All Assets)
     total_assets = (
         await db.execute(
             select(func.count(Asset.id)).where(
@@ -40,7 +166,6 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
-    # Total vulns (only owned assets)
     total_vulns = (
         await db.execute(
             select(func.count(Vulnerability.id))
@@ -49,7 +174,6 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
-    # Open vulns
     open_vulns = (
         await db.execute(
             select(func.count(Vulnerability.id))
@@ -61,7 +185,6 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
-    # Mitigated vulns
     mitigated_vulns = (
         await db.execute(
             select(func.count(Vulnerability.id))
@@ -73,7 +196,6 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
-    # Critical + High open count
     crit_high_count = (
         await db.execute(
             select(func.count(Vulnerability.id))
@@ -86,7 +208,6 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
-    # Verified Dangerous Vulns (danger_score > 6 + verified active)
     verified_dangerous_count = (
         await db.execute(
             select(func.count(Vulnerability.id))
@@ -104,7 +225,6 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
-    # Scans run in last 30 days
     scans_30d = (
         await db.execute(
             select(func.count(Scan.id)).where(
@@ -114,9 +234,30 @@ async def get_dashboard_summary(
         )
     ).scalar_one()
 
+    # Query latest scan account-wide
+    latest_scan_query = (
+        select(Scan)
+        .where(Scan.created_by == current_user.id)
+        .order_by(Scan.started_at.desc().nullslast(), Scan.id.desc())
+        .limit(1)
+    )
+    latest_scan = (await db.execute(latest_scan_query)).scalar_one_or_none()
+    if latest_scan:
+        latest_scan_data = {
+            "id": latest_scan.id,
+            "asset_id": latest_scan.asset_id,
+            "status": latest_scan.status.value,
+            "scan_type": latest_scan.scan_type.value if hasattr(latest_scan.scan_type, "value") else str(latest_scan.scan_type),
+            "started_at": latest_scan.started_at.isoformat() if latest_scan.started_at else None,
+            "completed_at": latest_scan.completed_at.isoformat() if latest_scan.completed_at else None,
+            "total_vulns_found": latest_scan.total_vulns_found,
+            "scan_findings_count": latest_scan.total_vulns_found,
+        }
+
     return {
         "status": "success",
         "data": {
+            "scope": "all",
             "total_assets": total_assets,
             "total_vulnerabilities": total_vulns,
             "open_vulns": open_vulns,
@@ -124,6 +265,8 @@ async def get_dashboard_summary(
             "critical_high_count": crit_high_count,
             "verified_dangerous_count": verified_dangerous_count,
             "scans_run_30d": scans_30d,
+            "selected_asset": None,
+            "latest_scan": latest_scan_data,
         },
     }
 
@@ -132,14 +275,24 @@ async def get_dashboard_summary(
 async def get_severity_distribution(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    asset_id: Optional[int] = Query(None, description="Scope severity distribution to a specific asset"),
 ) -> Dict[str, Any]:
-    """Retrieve vulnerability breakdown by CVSS severity classification for donut charts."""
-    counts_query = (
-        select(Vulnerability.severity, func.count(Vulnerability.id))
-        .join(Asset, Vulnerability.asset_id == Asset.id)
-        .where(Asset.owner_id == current_user.id)
-        .group_by(Vulnerability.severity)
-    )
+    """Retrieve vulnerability breakdown by CVSS severity classification, optionally scoped to an asset."""
+    if asset_id is not None:
+        await _verify_asset_ownership(db, asset_id, current_user.id)
+        counts_query = (
+            select(Vulnerability.severity, func.count(Vulnerability.id))
+            .where(Vulnerability.asset_id == asset_id)
+            .group_by(Vulnerability.severity)
+        )
+    else:
+        counts_query = (
+            select(Vulnerability.severity, func.count(Vulnerability.id))
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(Asset.owner_id == current_user.id)
+            .group_by(Vulnerability.severity)
+        )
+
     result = await db.execute(counts_query)
     raw_dict = dict(result.all())
 
@@ -171,53 +324,76 @@ async def get_severity_distribution(
 async def get_vulnerability_trend(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    asset_id: Optional[int] = Query(None, description="Scope discovery trend to a specific asset"),
 ) -> Dict[str, Any]:
-    """Retrieve 30-day timeline trend showing newly discovered vulnerabilities per day."""
+    """Retrieve 30-day timeline trend showing newly discovered vulnerabilities per day, optionally scoped."""
     start_date = datetime.now(timezone.utc) - timedelta(days=29)
 
-    # Check if user has any vulnerability findings at all
-    user_vulns_count_query = (
-        select(func.count(Vulnerability.id))
-        .join(Asset, Vulnerability.asset_id == Asset.id)
-        .where(Asset.owner_id == current_user.id)
-    )
-    total_user_vulns = (await db.execute(user_vulns_count_query)).scalar_one()
+    if asset_id is not None:
+        await _verify_asset_ownership(db, asset_id, current_user.id)
+        asset_vulns_count_query = select(func.count(Vulnerability.id)).where(Vulnerability.asset_id == asset_id)
+        total_vulns = (await db.execute(asset_vulns_count_query)).scalar_one()
 
-    # If user has no vulnerabilities at all, do not return synthetic timeline
-    if total_user_vulns == 0:
-        return {
-            "status": "success",
-            "data": [],
-        }
+        if total_vulns == 0:
+            return {
+                "status": "success",
+                "data": [],
+            }
 
-    day_col = func.date_trunc(literal_column("'day'"), Vulnerability.first_seen_at).label("day")
-    query = (
-        select(
-            day_col,
-            func.count(Vulnerability.id).label("count"),
+        day_col = func.date_trunc(literal_column("'day'"), Vulnerability.first_seen_at).label("day")
+        query = (
+            select(
+                day_col,
+                func.count(Vulnerability.id).label("count"),
+            )
+            .where(
+                Vulnerability.asset_id == asset_id,
+                Vulnerability.first_seen_at >= start_date,
+            )
+            .group_by(day_col)
+            .order_by(day_col)
         )
-        .join(Asset, Vulnerability.asset_id == Asset.id)
-        .where(
-            Asset.owner_id == current_user.id,
-            Vulnerability.first_seen_at >= start_date,
+    else:
+        user_vulns_count_query = (
+            select(func.count(Vulnerability.id))
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(Asset.owner_id == current_user.id)
         )
-        .group_by(day_col)
-        .order_by(day_col)
-    )
+        total_user_vulns = (await db.execute(user_vulns_count_query)).scalar_one()
+
+        if total_user_vulns == 0:
+            return {
+                "status": "success",
+                "data": [],
+            }
+
+        day_col = func.date_trunc(literal_column("'day'"), Vulnerability.first_seen_at).label("day")
+        query = (
+            select(
+                day_col,
+                func.count(Vulnerability.id).label("count"),
+            )
+            .join(Asset, Vulnerability.asset_id == Asset.id)
+            .where(
+                Asset.owner_id == current_user.id,
+                Vulnerability.first_seen_at >= start_date,
+            )
+            .group_by(day_col)
+            .order_by(day_col)
+        )
+
     records = (await db.execute(query)).all()
     counts_by_date = {
         r.day.strftime("%Y-%m-%d") if hasattr(r.day, "strftime") else str(r.day)[:10]: r.count
         for r in records
     }
 
-    # If there are no discoveries in the last 30 days, return empty list for clean empty state
     if sum(counts_by_date.values()) == 0:
         return {
             "status": "success",
             "data": [],
         }
 
-    # Fill daily series for continuous area chart with both 'discovered' and 'count' keys
     trend_series = []
     for i in range(30):
         current_day = start_date + timedelta(days=i)
@@ -241,8 +417,9 @@ async def get_vulnerability_trend(
 async def get_top_risky_assets(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    asset_id: Optional[int] = Query(None, description="Filter risky assets report to a specific asset"),
 ) -> Dict[str, Any]:
-    """Retrieve top 5 riskiest network assets ranked by number of open critical and high vulnerabilities."""
+    """Retrieve riskiest network assets ranked by number of open critical and high vulnerabilities."""
     query = (
         select(
             Asset.id,
@@ -273,7 +450,14 @@ async def get_top_risky_assets(
         )
         .join(Vulnerability, Vulnerability.asset_id == Asset.id, isouter=True)
         .where(Asset.owner_id == current_user.id)
-        .group_by(Asset.id, Asset.name, Asset.ip_address, Asset.criticality)
+    )
+
+    if asset_id is not None:
+        await _verify_asset_ownership(db, asset_id, current_user.id)
+        query = query.where(Asset.id == asset_id)
+
+    query = (
+        query.group_by(Asset.id, Asset.name, Asset.ip_address, Asset.criticality)
         .order_by(
             (
                 func.count(
@@ -327,8 +511,9 @@ async def get_top_risky_assets(
 async def get_top_dangerous_vulnerabilities(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    asset_id: Optional[int] = Query(None, description="Scope dangerous vulnerabilities to a specific asset"),
 ) -> Dict[str, Any]:
-    """Retrieve top 5 most dangerous active vulnerabilities ranked by danger_score."""
+    """Retrieve top 5 most dangerous active vulnerabilities, optionally scoped to an asset."""
     query = (
         select(Vulnerability)
         .join(Asset, Vulnerability.asset_id == Asset.id)
@@ -338,9 +523,14 @@ async def get_top_dangerous_vulnerabilities(
             Vulnerability.status.in_([VulnerabilityStatus.open, VulnerabilityStatus.in_progress]),
             Vulnerability.danger_score.isnot(None),
         )
-        .order_by(Vulnerability.danger_score.desc(), Vulnerability.id.desc())
-        .limit(5)
     )
+
+    if asset_id is not None:
+        await _verify_asset_ownership(db, asset_id, current_user.id)
+        query = query.where(Vulnerability.asset_id == asset_id)
+
+    query = query.order_by(Vulnerability.danger_score.desc(), Vulnerability.id.desc()).limit(5)
+
     results = (await db.execute(query)).scalars().all()
     items = [
         {
@@ -371,16 +561,22 @@ async def get_top_dangerous_vulnerabilities(
 async def get_recent_vulnerabilities(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    asset_id: Optional[int] = Query(None, description="Scope recent discoveries to a specific asset"),
 ) -> Dict[str, Any]:
-    """Retrieve the latest 8 vulnerability discoveries for live activity monitoring."""
+    """Retrieve the latest 8 vulnerability discoveries, optionally scoped to an asset."""
     query = (
         select(Vulnerability)
         .join(Asset, Vulnerability.asset_id == Asset.id)
         .options(selectinload(Vulnerability.asset))
         .where(Asset.owner_id == current_user.id)
-        .order_by(Vulnerability.first_seen_at.desc(), Vulnerability.id.desc())
-        .limit(8)
     )
+
+    if asset_id is not None:
+        await _verify_asset_ownership(db, asset_id, current_user.id)
+        query = query.where(Vulnerability.asset_id == asset_id)
+
+    query = query.order_by(Vulnerability.first_seen_at.desc(), Vulnerability.id.desc()).limit(8)
+
     results = (await db.execute(query)).scalars().all()
 
     items = [
