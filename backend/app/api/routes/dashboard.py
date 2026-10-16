@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.asset import Asset
-from app.models.scan import Scan
+from app.models.scan import Scan, ScanStatus
 from app.models.user import User
 from app.models.vulnerability import (
     VerificationType,
@@ -175,6 +175,21 @@ async def get_vulnerability_trend(
     """Retrieve 30-day timeline trend showing newly discovered vulnerabilities per day."""
     start_date = datetime.now(timezone.utc) - timedelta(days=29)
 
+    # Check if user has any vulnerability findings at all
+    user_vulns_count_query = (
+        select(func.count(Vulnerability.id))
+        .join(Asset, Vulnerability.asset_id == Asset.id)
+        .where(Asset.owner_id == current_user.id)
+    )
+    total_user_vulns = (await db.execute(user_vulns_count_query)).scalar_one()
+
+    # If user has no vulnerabilities at all, do not return synthetic timeline
+    if total_user_vulns == 0:
+        return {
+            "status": "success",
+            "data": [],
+        }
+
     day_col = func.date_trunc(literal_column("'day'"), Vulnerability.first_seen_at).label("day")
     query = (
         select(
@@ -195,16 +210,25 @@ async def get_vulnerability_trend(
         for r in records
     }
 
-    # Fill daily series for continuous area chart
+    # If there are no discoveries in the last 30 days, return empty list for clean empty state
+    if sum(counts_by_date.values()) == 0:
+        return {
+            "status": "success",
+            "data": [],
+        }
+
+    # Fill daily series for continuous area chart with both 'discovered' and 'count' keys
     trend_series = []
     for i in range(30):
         current_day = start_date + timedelta(days=i)
         day_key = current_day.strftime("%Y-%m-%d")
         display_label = current_day.strftime("%b %d")
+        c = counts_by_date.get(day_key, 0)
         trend_series.append({
             "date": day_key,
             "label": display_label,
-            "count": counts_by_date.get(day_key, 0),
+            "discovered": c,
+            "count": c,
         })
 
     return {

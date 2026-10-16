@@ -93,6 +93,15 @@ export default function Vulnerabilities() {
     fetchVulns();
   }, [fetchVulns]);
 
+  // Refresh vulnerabilities when a scan finishes
+  useEffect(() => {
+    const handleScanComplete = () => {
+      fetchVulns();
+    };
+    window.addEventListener('aegis:scan-completed', handleScanComplete);
+    return () => window.removeEventListener('aegis:scan-completed', handleScanComplete);
+  }, [fetchVulns]);
+
   // Handle Sort Toggle
   const handleSort = (field) => {
     if (sortBy === field) {

@@ -286,6 +286,10 @@ export default function Scans() {
     try {
       const res = await api.get(`/api/scans/${scan.id}`);
       setScanDetails(res.data);
+      if (res.data && typeof res.data.total_vulns_found === 'number' && res.data.total_vulns_found !== scan.total_vulns_found) {
+        setSelectedScan((prev) => (prev ? { ...prev, total_vulns_found: res.data.total_vulns_found } : prev));
+        setScans((prev) => prev.map((s) => (s.id === scan.id ? { ...s, total_vulns_found: res.data.total_vulns_found } : s)));
+      }
     } catch (err) {
       console.error('Failed to load scan details:', err);
       setScanDetails(scan);
@@ -1011,130 +1015,137 @@ export default function Scans() {
       </div>
 
       {/* SCAN DETAILS & RECONNAISSANCE SUMMARY MODAL */}
-      {selectedScan && (
-        <div 
-          onClick={handleCloseModal}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
-        >
+      {selectedScan && (() => {
+        const dossierVulnsCount = scanDetails
+          ? (typeof scanDetails.total_vulns_found === 'number'
+              ? scanDetails.total_vulns_found
+              : (scanDetails.vuln_counts ? Object.values(scanDetails.vuln_counts).reduce((a, b) => a + b, 0) : selectedScan?.total_vulns_found || 0))
+          : (selectedScan?.total_vulns_found || 0);
+
+        return (
           <div 
-            onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-4xl max-h-[90vh] bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            onClick={handleCloseModal}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
           >
-            {/* Modal Header */}
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-950/60 border border-cyan-800/50 flex items-center justify-center text-cyan-400">
-                  <Activity className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-white font-mono">
-                      Scan Execution Dossier #{selectedScan.id}
-                    </h3>
-                    <ScanStatusBadge status={selectedScan.status} />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-4xl max-h-[90vh] bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-950/60 border border-cyan-800/50 flex items-center justify-center text-cyan-400">
+                    <Activity className="w-5 h-5" />
                   </div>
-                  <p className="text-xs font-mono text-slate-400 mt-0.5">
-                    Target: <span className="text-white font-semibold">{selectedScan.asset_name}</span>
-                    {selectedScan.asset_ip ? ` (${selectedScan.asset_ip})` : ''}
-                    {selectedScan.resolved_ip ? ` ↳ ${selectedScan.resolved_ip}` : ''}
-                  </p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-white font-mono">
+                        Scan Execution Dossier #{selectedScan.id}
+                      </h3>
+                      <ScanStatusBadge status={selectedScan.status} />
+                    </div>
+                    <p className="text-xs font-mono text-slate-400 mt-0.5">
+                      Target: <span className="text-white font-semibold">{selectedScan.asset_name}</span>
+                      {selectedScan.asset_ip ? ` (${selectedScan.asset_ip})` : ''}
+                      {selectedScan.resolved_ip ? ` ↳ ${selectedScan.resolved_ip}` : ''}
+                    </p>
+                  </div>
                 </div>
+
+                <button
+                  data-testid="close-dossier-btn"
+                  aria-label="Close Dossier Modal"
+                  onClick={handleCloseModal}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              <button
-                data-testid="close-dossier-btn"
-                aria-label="Close Dossier Modal"
-                onClick={handleCloseModal}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Scrollable Body */}
-            <div className="p-6 space-y-6 overflow-y-auto">
-              {detailsLoading ? (
-                <div className="py-16 text-center text-slate-500 space-y-2">
-                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-cyan-400" />
-                  <p className="text-xs font-mono">Loading telemetry and reconnaissance data...</p>
-                </div>
-              ) : (
-                <>
-                  {/* Scan Failure Reason Banner (Issue 1B Transparency) */}
-                  {(selectedScan.status === 'failed' || scanDetails?.raw_output?.error) && (
-                    <div className="p-5 rounded-xl bg-rose-950/25 border border-rose-800/60 space-y-3.5 shadow-lg">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2 text-rose-400">
-                          <AlertTriangle className="w-5 h-5 shrink-0 text-rose-400" />
-                          <h4 className="text-sm font-mono font-bold uppercase tracking-wider text-rose-300">
-                            Scan Execution Failure
-                          </h4>
+              {/* Modal Scrollable Body */}
+              <div className="p-6 space-y-6 overflow-y-auto">
+                {detailsLoading ? (
+                  <div className="py-16 text-center text-slate-500 space-y-2">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto text-cyan-400" />
+                    <p className="text-xs font-mono">Loading telemetry and reconnaissance data...</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Scan Failure Reason Banner (Issue 1B Transparency) */}
+                    {(selectedScan.status === 'failed' || scanDetails?.raw_output?.error) && (
+                      <div className="p-5 rounded-xl bg-rose-950/25 border border-rose-800/60 space-y-3.5 shadow-lg">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 text-rose-400">
+                            <AlertTriangle className="w-5 h-5 shrink-0 text-rose-400" />
+                            <h4 className="text-sm font-mono font-bold uppercase tracking-wider text-rose-300">
+                              Scan Execution Failure
+                            </h4>
+                          </div>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-900/50 text-rose-200 border border-rose-700/60 font-semibold uppercase">
+                            Aborted at: {scanDetails?.raw_output?.failure_stage || selectedScan.progress?.current_stage || 'Engine Pipeline'}
+                          </span>
                         </div>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-900/50 text-rose-200 border border-rose-700/60 font-semibold uppercase">
-                          Aborted at: {scanDetails?.raw_output?.failure_stage || selectedScan.progress?.current_stage || 'Engine Pipeline'}
-                        </span>
-                      </div>
 
-                      {/* Primary Error Message */}
-                      <div className="p-3.5 rounded-lg bg-black/60 border border-rose-900/60 font-mono text-xs text-rose-200 space-y-1">
-                        <span className="text-[10px] text-slate-500 uppercase font-semibold block">Error Message:</span>
-                        <p className="font-semibold text-rose-300 text-[13px]">
-                          {scanDetails?.raw_output?.error || selectedScan.progress?.detail || 'Scan aborted due to target reachability or execution error.'}
-                        </p>
-                        {scanDetails?.raw_output?.error_type && (
-                          <span className="text-[10px] text-slate-400 block pt-0.5">
-                            Exception: <code className="text-rose-400">{scanDetails.raw_output.error_type}</code>
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Actionable Hint Callout */}
-                      <div className="p-3 rounded-lg bg-amber-950/25 border border-amber-800/40 font-mono text-xs text-amber-200 flex items-start gap-2.5">
-                        <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-bold text-amber-300 uppercase tracking-wider text-[11px] block mb-0.5">
-                            Actionable Recommendation
-                          </span>
-                          <p className="text-amber-200/90 leading-relaxed font-sans text-xs">
-                            {scanDetails?.raw_output?.error_hint ||
-                              (String(scanDetails?.raw_output?.error || selectedScan.progress?.detail || '').toLowerCase().includes('offline')
-                                ? 'Host unreachable — verify target is powered on, public DNS resolves, and external firewall/routing permits TCP/UDP connections.'
-                                : 'Inspect network routing, firewall ACLs, or system diagnostics to identify reachability constraints.')}
+                        {/* Primary Error Message */}
+                        <div className="p-3.5 rounded-lg bg-black/60 border border-rose-900/60 font-mono text-xs text-rose-200 space-y-1">
+                          <span className="text-[10px] text-slate-500 uppercase font-semibold block">Error Message:</span>
+                          <p className="font-semibold text-rose-300 text-[13px]">
+                            {scanDetails?.raw_output?.error || selectedScan.progress?.detail || 'Scan aborted due to target reachability or execution error.'}
                           </p>
+                          {scanDetails?.raw_output?.error_type && (
+                            <span className="text-[10px] text-slate-400 block pt-0.5">
+                              Exception: <code className="text-rose-400">{scanDetails.raw_output.error_type}</code>
+                            </span>
+                          )}
                         </div>
-                      </div>
 
-                      {/* Technical Details Footer */}
-                      <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono text-slate-400 pt-1 border-t border-rose-900/30">
-                        <div>
-                          <span className="text-slate-500">Target IP: </span>
-                          <span className="text-slate-300 font-semibold">{scanDetails?.raw_output?.target_ip || selectedScan.resolved_ip || selectedScan.asset_ip || 'N/A'}</span>
+                        {/* Actionable Hint Callout */}
+                        <div className="p-3 rounded-lg bg-amber-950/25 border border-amber-800/40 font-mono text-xs text-amber-200 flex items-start gap-2.5">
+                          <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-amber-300 uppercase tracking-wider text-[11px] block mb-0.5">
+                              Actionable Recommendation
+                            </span>
+                            <p className="text-amber-200/90 leading-relaxed font-sans text-xs">
+                              {scanDetails?.raw_output?.error_hint ||
+                                (String(scanDetails?.raw_output?.error || selectedScan.progress?.detail || '').toLowerCase().includes('offline')
+                                  ? 'Host unreachable — verify target is powered on, public DNS resolves, and external firewall/routing permits TCP/UDP connections.'
+                                  : 'Inspect network routing, firewall ACLs, or system diagnostics to identify reachability constraints.')}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-slate-500">Scan Profile: </span>
-                          <span className="text-slate-300 uppercase">{selectedScan.scan_type}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Duration before failure: </span>
-                          <span className="text-slate-300">{formatElapsed(selectedScan.started_at, selectedScan.completed_at)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
-                  {/* High Level Metrics Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
-                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1">
-                        Total Findings
-                      </span>
-                      <div className="text-xl font-bold font-mono text-white flex items-center gap-2">
-                        <span>{selectedScan.total_vulns_found}</span>
-                        {selectedScan.total_vulns_found > 0 && (
-                          <span className="text-xs text-rose-400 font-normal">vulnerabilities</span>
-                        )}
+                        {/* Technical Details Footer */}
+                        <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono text-slate-400 pt-1 border-t border-rose-900/30">
+                          <div>
+                            <span className="text-slate-500">Target IP: </span>
+                            <span className="text-slate-300 font-semibold">{scanDetails?.raw_output?.target_ip || selectedScan.resolved_ip || selectedScan.asset_ip || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Scan Profile: </span>
+                            <span className="text-slate-300 uppercase">{selectedScan.scan_type}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Duration before failure: </span>
+                            <span className="text-slate-300">{formatElapsed(selectedScan.started_at, selectedScan.completed_at)}</span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* High Level Metrics Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                        <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1">
+                          Total Findings
+                        </span>
+                        <div className="text-xl font-bold font-mono text-white flex items-center gap-2">
+                          <span>{dossierVulnsCount}</span>
+                          {dossierVulnsCount > 0 && (
+                            <span className="text-xs text-rose-400 font-normal">vulnerabilities</span>
+                          )}
+                        </div>
+                      </div>
 
                     <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
                       <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1">
@@ -1472,7 +1483,7 @@ export default function Scans() {
                 Close Dossier
               </button>
 
-              {selectedScan.total_vulns_found > 0 && (
+              {dossierVulnsCount > 0 && (
                 <button
                   onClick={() => {
                     const sid = selectedScan.id;
@@ -1482,14 +1493,15 @@ export default function Scans() {
                   }}
                   className="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.25)]"
                 >
-                  <span>Explore All {selectedScan.total_vulns_found} Vulnerability Findings</span>
+                  <span>Explore All {dossierVulnsCount} Vulnerability Findings</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
           </div>
         </div>
-      )}
+      );
+    })()}
     </div>
   );
 }

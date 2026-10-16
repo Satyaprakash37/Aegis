@@ -164,6 +164,7 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                 "nuclei_verified": 0,
                 "ssl_verified": 0,
             }
+            scan_vuln_ids: set[int] = set()
 
             now_utc = datetime.now(timezone.utc)
 
@@ -209,6 +210,7 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                 )
 
                 await db.commit()
+                scan_vuln_ids.add(vuln_obj.id)
                 total_vulns += 1
                 ver_val = vuln_obj.verification.value if hasattr(vuln_obj.verification, "value") else str(vuln_obj.verification)
                 verification_counts[ver_val] = verification_counts.get(ver_val, 0) + 1
@@ -269,6 +271,7 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                     )
 
                     await db.commit()
+                    scan_vuln_ids.add(vuln_obj.id)
                     total_vulns += 1
                     ver_val = vuln_obj.verification.value if hasattr(vuln_obj.verification, "value") else str(vuln_obj.verification)
                     verification_counts[ver_val] = verification_counts.get(ver_val, 0) + 1
@@ -303,28 +306,71 @@ async def execute_scan_pipeline(scan_id: int) -> None:
                     asset.asset_type = AssetType.db
                     logger.info(f"Smart Detection: Auto-created asset #{asset.id} ('{asset.name}') updated to type 'db'")
 
-            # Update final scan record with breakdown and recon data
+            # Authoritatively compute persisted vulnerability counts directly from database
+            persisted_total = len(scan_vuln_ids)
+            db_verification_counts = {}
+            db_severity_counts = {}
+
+            if scan_vuln_ids:
+                v_counts_query = (
+                    select(Vulnerability.verification, func.count(Vulnerability.id))
+                    .where(Vulnerability.id.in_(scan_vuln_ids))
+                    .group_by(Vulnerability.verification)
+                )
+                v_counts_res = await db.execute(v_counts_query)
+                db_verification_counts = {
+                    (v.value if hasattr(v, "value") else str(v)): count
+                    for v, count in v_counts_res.all()
+                }
+
+                s_counts_query = (
+                    select(Vulnerability.severity, func.count(Vulnerability.id))
+                    .where(Vulnerability.id.in_(scan_vuln_ids))
+                    .group_by(Vulnerability.severity)
+                )
+                s_counts_res = await db.execute(s_counts_query)
+                db_severity_counts = {
+                    (s.value if hasattr(s, "value") else str(s)): count
+                    for s, count in s_counts_res.all()
+                }
+            elif scan.id:
+                persisted_count_query = select(func.count(Vulnerability.id)).where(Vulnerability.scan_id == scan.id)
+                persisted_total = (await db.execute(persisted_count_query)).scalar_one()
+                v_counts_query = (
+                    select(Vulnerability.verification, func.count(Vulnerability.id))
+                    .where(Vulnerability.scan_id == scan.id)
+                    .group_by(Vulnerability.verification)
+                )
+                v_counts_res = await db.execute(v_counts_query)
+                db_verification_counts = {
+                    (v.value if hasattr(v, "value") else str(v)): count
+                    for v, count in v_counts_res.all()
+                }
+
+            # Update final scan record with breakdown, vulnerability IDs and recon data
             raw_out = scan.raw_output or {}
-            raw_out["verification_breakdown"] = verification_counts
+            raw_out["vulnerability_ids"] = sorted(list(scan_vuln_ids))
+            raw_out["verification_breakdown"] = db_verification_counts
+            raw_out["vuln_counts"] = db_severity_counts
             if recon_data:
                 raw_out["recon"] = recon_data
             scan.raw_output = raw_out
             scan.status = ScanStatus.completed
             scan.completed_at = datetime.now(timezone.utc)
-            scan.total_vulns_found = total_vulns
+            scan.total_vulns_found = persisted_total
 
             final_stages = 7 if is_deep else 2
             await update_progress(
                 current_stage="completed",
                 stage_number=final_stages,
                 stages_total=final_stages,
-                detail=f"Scan completed: {total_vulns} finding(s) identified",
+                detail=f"Scan completed: {persisted_total} finding(s) identified",
             )
             await db.commit()
 
             logger.info(
-                f"Scan #{scan.id} completed successfully. Identified {total_vulns} finding(s) "
-                f"(Breakdown: {verification_counts})."
+                f"Scan #{scan.id} completed successfully. Identified {persisted_total} finding(s) "
+                f"(Breakdown: {db_verification_counts})."
             )
 
         except ScanExecutionError as see:

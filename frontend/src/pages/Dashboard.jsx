@@ -137,6 +137,15 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [fetchDashboardData]);
 
+  // Real-time refresh on scan completion
+  useEffect(() => {
+    const handleScanComplete = () => {
+      fetchDashboardData(true);
+    };
+    window.addEventListener('aegis:scan-completed', handleScanComplete);
+    return () => window.removeEventListener('aegis:scan-completed', handleScanComplete);
+  }, [fetchDashboardData]);
+
   // Compute total vulns from severity for Donut center
   const totalInDistribution = severityDist.reduce((acc, item) => acc + (item.count || 0), 0);
 
@@ -392,6 +401,20 @@ export default function Dashboard() {
           {loading ? (
             <div className="flex-1 flex items-center justify-center min-h-[260px]">
               <div className="h-40 w-full bg-slate-900/40 animate-pulse rounded-lg" />
+            </div>
+          ) : !trendData || trendData.length === 0 || !trendData.some((d) => (d.discovered || d.count || 0) > 0) ? (
+            <div className="flex-1 flex flex-col items-center justify-center min-h-[250px] text-center p-6 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500">
+                <TrendingUp className="w-6 h-6 text-slate-500" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-mono text-slate-300 font-medium">
+                  No discovery history yet
+                </p>
+                <p className="text-xs font-mono text-slate-500 max-w-sm">
+                  No discovery history yet — run a scan to populate this chart.
+                </p>
+              </div>
             </div>
           ) : (
             <div className="h-[250px] w-full">

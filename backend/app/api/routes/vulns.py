@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_current_user, require_admin, require_analyst_or_admin
 from app.db.session import get_db
 from app.models.asset import Asset
+from app.models.scan import Scan
 from app.models.user import User
 from app.models.vulnerability import (
     VerificationType,
@@ -152,8 +153,14 @@ async def list_vulnerabilities(
         count_query = count_query.where(Vulnerability.asset_id == asset_id)
 
     if scan_id:
-        query = query.where(Vulnerability.scan_id == scan_id)
-        count_query = count_query.where(Vulnerability.scan_id == scan_id)
+        scan_rec = await db.scalar(select(Scan).where(Scan.id == scan_id))
+        scan_vuln_ids = scan_rec.raw_output.get("vulnerability_ids") if (scan_rec and scan_rec.raw_output) else None
+        if scan_vuln_ids:
+            scan_clause = or_(Vulnerability.scan_id == scan_id, Vulnerability.id.in_(scan_vuln_ids))
+        else:
+            scan_clause = (Vulnerability.scan_id == scan_id)
+        query = query.where(scan_clause)
+        count_query = count_query.where(scan_clause)
 
     if search:
         search_filter = or_(

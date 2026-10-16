@@ -381,14 +381,37 @@ async def get_scan(
             detail=f"Scan with ID {id} not found",
         )
 
+    # Determine the vulnerability filter:
+    # 1. If scan has vulnerability_ids recorded in raw_output, use those (plus any scan_id matches)
+    # 2. Otherwise query by Vulnerability.scan_id == id
+    scan_vuln_ids = scan.raw_output.get("vulnerability_ids") if scan.raw_output else None
+    if scan_vuln_ids:
+        vuln_filter = or_(Vulnerability.scan_id == id, Vulnerability.id.in_(scan_vuln_ids))
+    else:
+        vuln_filter = (Vulnerability.scan_id == id)
+
     # Compute vulnerability counts by severity for this scan
     counts_query = (
         select(Vulnerability.severity, func.count(Vulnerability.id))
-        .where(Vulnerability.scan_id == id)
+        .where(vuln_filter)
         .group_by(Vulnerability.severity)
     )
     counts_result = await db.execute(counts_query)
     raw_counts = dict(counts_result.all())
+    persisted_total = sum(raw_counts.values())
+
+    # Safe reconciliation: Only update stored count if persisted records exist and differed
+    # (e.g. historical un-deduplicated loop count). Never zero out historical records.
+    if persisted_total > 0 and scan.total_vulns_found != persisted_total:
+        scan.total_vulns_found = persisted_total
+        await db.commit()
+    elif persisted_total == 0 and scan.total_vulns_found > 0:
+        # Fallback to saved vuln_counts in raw_output if records were superseded
+        saved_counts = scan.raw_output.get("vuln_counts") if scan.raw_output else None
+        if saved_counts:
+            raw_counts = {
+                VulnerabilitySeverity(k): v for k, v in saved_counts.items() if k in VulnerabilitySeverity.__members__
+            }
 
     vuln_counts = VulnSeverityCounts(
         critical=raw_counts.get(VulnerabilitySeverity.critical, 0),
@@ -402,17 +425,27 @@ async def get_scan(
     from app.models.vulnerability import VerificationType
     v_counts_query = (
         select(Vulnerability.verification, func.count(Vulnerability.id))
-        .where(Vulnerability.scan_id == id)
+        .where(vuln_filter)
         .group_by(Vulnerability.verification)
     )
     v_counts_result = await db.execute(v_counts_query)
     raw_v_counts = dict(v_counts_result.all())
-    verification_breakdown = {
-        "version_match": raw_v_counts.get(VerificationType.version_match, 0),
-        "nse_verified": raw_v_counts.get(VerificationType.nse_verified, 0),
-        "nuclei_verified": raw_v_counts.get(VerificationType.nuclei_verified, 0),
-        "ssl_verified": raw_v_counts.get(VerificationType.ssl_verified, 0),
-    }
+    saved_v_counts = scan.raw_output.get("verification_breakdown") if scan.raw_output else None
+
+    if not raw_v_counts and saved_v_counts:
+        verification_breakdown = {
+            "version_match": saved_v_counts.get("version_match", 0),
+            "nse_verified": saved_v_counts.get("nse_verified", 0),
+            "nuclei_verified": saved_v_counts.get("nuclei_verified", 0),
+            "ssl_verified": saved_v_counts.get("ssl_verified", 0),
+        }
+    else:
+        verification_breakdown = {
+            "version_match": raw_v_counts.get(VerificationType.version_match, 0),
+            "nse_verified": raw_v_counts.get(VerificationType.nse_verified, 0),
+            "nuclei_verified": raw_v_counts.get(VerificationType.nuclei_verified, 0),
+            "ssl_verified": raw_v_counts.get(VerificationType.ssl_verified, 0),
+        }
 
     return ScanDetailRead(
         id=scan.id,
@@ -450,10 +483,16 @@ async def get_scan_vulnerabilities(
             detail=f"Scan with ID {id} not found",
         )
 
+    scan_vuln_ids = scan.raw_output.get("vulnerability_ids") if scan.raw_output else None
+    if scan_vuln_ids:
+        vuln_filter = or_(Vulnerability.scan_id == id, Vulnerability.id.in_(scan_vuln_ids))
+    else:
+        vuln_filter = (Vulnerability.scan_id == id)
+
     vulns_query = (
         select(Vulnerability)
         .options(selectinload(Vulnerability.asset))
-        .where(Vulnerability.scan_id == id)
+        .where(vuln_filter)
         .order_by(Vulnerability.cvss_score.desc())
     )
     vulns = (await db.execute(vulns_query)).scalars().all()
