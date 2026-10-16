@@ -182,6 +182,34 @@ export default function Dashboard() {
 
       setViewMode(mode);
       setSelectedAssetId(targetId);
+
+      // Initial URL synchronization with history replacement (prevents navigation loops)
+      if (mode === 'asset' && targetId) {
+        if (urlAssetId !== String(targetId) || urlMode !== 'asset') {
+          setSearchParams(
+            (prev) => {
+              const updated = new URLSearchParams(prev);
+              updated.set('mode', 'asset');
+              updated.set('asset_id', String(targetId));
+              return updated;
+            },
+            { replace: true }
+          );
+        }
+      } else if (mode === 'all') {
+        if (urlMode !== 'all') {
+          setSearchParams(
+            (prev) => {
+              const updated = new URLSearchParams(prev);
+              updated.set('mode', 'all');
+              updated.delete('asset_id');
+              return updated;
+            },
+            { replace: true }
+          );
+        }
+      }
+
       fetchDashboardData(false, targetId, mode);
     }
 
@@ -204,7 +232,15 @@ export default function Dashboard() {
       if (completedAssetId) {
         setViewMode('asset');
         setSelectedAssetId(completedAssetId);
-        setSearchParams({ mode: 'asset', asset_id: String(completedAssetId) });
+        setSearchParams(
+          (prev) => {
+            const updated = new URLSearchParams(prev);
+            updated.set('mode', 'asset');
+            updated.set('asset_id', String(completedAssetId));
+            return updated;
+          },
+          { replace: true }
+        );
         fetchDashboardData(true, completedAssetId, 'asset');
       } else {
         fetchDashboardData(true);
@@ -221,14 +257,37 @@ export default function Dashboard() {
       const targetId = selectedAssetId || (assetsList.length > 0 ? assetsList[0].id : null);
       setSelectedAssetId(targetId);
       if (targetId) {
-        setSearchParams({ mode: 'asset', asset_id: String(targetId) });
+        setSearchParams(
+          (prev) => {
+            const updated = new URLSearchParams(prev);
+            updated.set('mode', 'asset');
+            updated.set('asset_id', String(targetId));
+            return updated;
+          },
+          { replace: true }
+        );
         fetchDashboardData(false, targetId, 'asset');
       } else {
-        setSearchParams({ mode: 'asset' });
+        setSearchParams(
+          (prev) => {
+            const updated = new URLSearchParams(prev);
+            updated.set('mode', 'asset');
+            return updated;
+          },
+          { replace: true }
+        );
         fetchDashboardData(false, null, 'asset');
       }
     } else {
-      setSearchParams({ mode: 'all' });
+      setSearchParams(
+        (prev) => {
+          const updated = new URLSearchParams(prev);
+          updated.set('mode', 'all');
+          updated.delete('asset_id');
+          return updated;
+        },
+        { replace: true }
+      );
       fetchDashboardData(false, null, 'all');
     }
   };
@@ -236,7 +295,15 @@ export default function Dashboard() {
   const handleAssetChange = (newAssetId) => {
     setSelectedAssetId(newAssetId);
     setViewMode('asset');
-    setSearchParams({ mode: 'asset', asset_id: String(newAssetId) });
+    setSearchParams(
+      (prev) => {
+        const updated = new URLSearchParams(prev);
+        updated.set('mode', 'asset');
+        updated.set('asset_id', String(newAssetId));
+        return updated;
+      },
+      { replace: true }
+    );
     fetchDashboardData(false, newAssetId, 'asset');
   };
 
