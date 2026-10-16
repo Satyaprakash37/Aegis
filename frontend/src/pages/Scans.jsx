@@ -1354,9 +1354,14 @@ export default function Scans() {
                                 Origin Infrastructure Map (VHost Routing & WAF Bypass)
                               </span>
                             </div>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-950/60 text-purple-300 border border-purple-800/40">
-                              {scanDetails.raw_output.recon.origin_infrastructure_map.length} Origins Mapped
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">
+                                {scanDetails.raw_output.recon.origin_infrastructure_map.filter(o => o.confidence === 'confirmed').length} Confirmed
+                              </span>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-950/60 text-purple-300 border border-purple-800/40">
+                                {scanDetails.raw_output.recon.origin_infrastructure_map.length} Total
+                              </span>
+                            </div>
                           </div>
 
                           <div className="border border-purple-900/30 rounded-lg overflow-hidden bg-slate-950">
@@ -1383,17 +1388,34 @@ export default function Scans() {
                                       {orig.origin_ip}:{orig.origin_port || 443}
                                     </td>
                                     <td className="py-2.5 px-3 text-slate-300">
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mr-1.5">
-                                        HTTP {orig.status_code || 200}
-                                      </span>
-                                      <span className="text-slate-400 truncate inline-block max-w-[180px] align-bottom" title={orig.title}>
-                                        {orig.title || 'OK'}
-                                      </span>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] border mr-1.5 ${
+                                          orig.status_code >= 200 && orig.status_code < 300
+                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                            : orig.status_code >= 300 && orig.status_code < 400
+                                            ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                                            : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                        }`}>
+                                          HTTP {orig.status_code || 200}
+                                        </span>
+                                        <span className="text-slate-400 truncate inline-block max-w-[180px] align-bottom" title={orig.title}>
+                                          {orig.title || 'OK'}
+                                        </span>
+                                      </div>
+                                      {orig.audit_note && (
+                                        <div className="text-[10px] text-slate-500 font-sans mt-0.5 truncate max-w-[280px]" title={orig.audit_note}>
+                                          {orig.audit_note}
+                                        </div>
+                                      )}
                                     </td>
                                     <td className="py-2.5 px-3 text-right">
                                       {orig.confidence === 'confirmed' ? (
                                         <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold shadow-[0_0_8px_rgba(16,185,129,0.15)]">
                                           CONFIRMED ✓
+                                        </span>
+                                      ) : orig.confidence === 'rejected' ? (
+                                        <span className="px-2 py-0.5 rounded text-[10px] bg-rose-500/15 text-rose-300 border border-rose-500/30 font-semibold">
+                                          REJECTED ✕
                                         </span>
                                       ) : (
                                         <span className="px-2 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold">

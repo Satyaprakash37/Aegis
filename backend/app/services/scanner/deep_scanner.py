@@ -37,23 +37,137 @@ from app.services.scanner.nmap_runner import (
 
 logger = logging.getLogger("aegis.scanner.deep")
 
-CDN_CIDR_NETWORKS = [
-    ipaddress.ip_network(cidr) for cidr in [
-        # Cloudflare IPv4 ranges
-        "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "104.16.0.0/13",
-        "104.24.0.0/14", "108.162.192.0/18", "131.0.72.0/22", "141.101.64.0/18",
-        "162.158.0.0/15", "172.64.0.0/13", "173.245.48.0/20", "188.114.96.0/20",
-        "190.93.240.0/20", "197.234.240.0/22", "198.41.128.0/17",
-        # Fastly
-        "151.101.0.0/16", "199.232.0.0/16",
-        # Akamai
-        "23.0.0.0/12", "104.64.0.0/10",
-        # AWS CloudFront / WAF
-        "13.32.0.0/15", "13.35.0.0/16", "18.64.0.0/14", "52.84.0.0/15",
-        "54.192.0.0/16", "54.230.0.0/16", "65.8.0.0/16", "65.9.0.0/16",
-        "99.84.0.0/16", "99.86.0.0/16", "205.251.192.0/19",
-    ]
+# Static CDN CIDR definitions for major cloud CDN and proxy edge networks
+STATIC_CDN_CIDRS = [
+    # Cloudflare IPv4 ranges (complete official list)
+    "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "104.16.0.0/13",
+    "104.24.0.0/14", "108.162.192.0/18", "131.0.72.0/22", "141.101.64.0/18",
+    "162.158.0.0/15", "172.64.0.0/13", "173.245.48.0/20", "188.114.96.0/20",
+    "190.93.240.0/20", "197.234.240.0/22", "198.41.128.0/17",
+    # AWS CloudFront (complete major prefixes including 13.224.0.0/14)
+    "13.224.0.0/14", "13.249.0.0/16", "13.32.0.0/15", "13.35.0.0/16",
+    "15.158.0.0/16", "18.64.0.0/14", "18.68.0.0/16", "18.154.0.0/15",
+    "18.160.0.0/15", "18.164.0.0/15", "18.172.0.0/15", "18.238.0.0/15",
+    "18.244.0.0/15", "24.110.32.0/19", "24.110.128.0/17", "3.160.0.0/14",
+    "3.164.0.0/14", "3.168.0.0/14", "3.172.0.0/14", "52.46.0.0/18",
+    "52.82.128.0/19", "52.84.0.0/15", "52.124.128.0/17", "52.222.128.0/17",
+    "54.182.0.0/16", "54.192.0.0/16", "54.230.0.0/16", "54.239.128.0/18",
+    "54.239.192.0/19", "54.240.128.0/18", "64.252.64.0/18", "64.252.128.0/18",
+    "65.8.0.0/16", "65.9.0.0/16", "70.132.0.0/18", "71.152.0.0/17",
+    "99.84.0.0/16", "99.86.0.0/16", "108.138.0.0/15", "108.156.0.0/14",
+    "130.176.0.0/16", "143.204.0.0/16", "144.220.0.0/16", "204.246.160.0/19",
+    "205.251.192.0/19", "216.137.32.0/19",
+    # Fastly (complete list)
+    "151.101.0.0/16", "199.232.0.0/16", "23.235.32.0/20", "43.249.72.0/22",
+    "103.244.50.0/24", "103.245.222.0/23", "103.245.224.0/24", "104.156.80.0/20",
+    "146.75.0.0/16", "157.52.64.0/18", "167.82.0.0/17", "172.111.64.0/18",
+    "185.31.16.0/22", "199.27.72.0/21",
+    # Akamai (major edge CIDRs)
+    "23.0.0.0/12", "23.192.0.0/11", "72.246.0.0/15", "88.221.0.0/16",
+    "96.6.0.0/15", "104.64.0.0/10", "184.24.0.0/13", "2.16.0.0/13",
+    # Azure Front Door & Microsoft CDN
+    "147.243.0.0/16", "13.107.246.0/24", "13.107.213.0/24", "199.27.135.0/24",
+    "20.150.0.0/17", "40.90.218.0/24", "52.245.0.0/17",
+    # Google Cloud CDN & Global External LBs
+    "34.64.0.0/10", "34.96.0.0/11", "34.120.0.0/14", "34.128.0.0/10",
+    "35.184.0.0/13", "35.224.0.0/12", "35.240.0.0/13", "130.211.0.0/22",
 ]
+
+CDN_CACHE_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "cdn_ranges.json")
+)
+
+
+def _fetch_dynamic_cloudfront_ranges() -> List[str]:
+    """Fetch official AWS CloudFront IP ranges dynamically."""
+    urls = [
+        "https://d7uri8nf7uskq.cloudfront.net/tools/list-cloudfront-ips",
+        "https://ip-ranges.amazonaws.com/ip-ranges.json",
+        "https://ip-ranges.amazonaws.com/cloudfront.json",
+    ]
+    headers = {"User-Agent": "AEGIS-Security-Scanner/1.0"}
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    prefixes = []
+                    if "CLOUDFRONT_GLOBAL_IP_LIST" in data:
+                        prefixes.extend(data.get("CLOUDFRONT_GLOBAL_IP_LIST", []))
+                        prefixes.extend(data.get("CLOUDFRONT_REGIONAL_EDGE_IP_LIST", []))
+                    elif "prefixes" in data:
+                        prefixes.extend(
+                            p["ip_prefix"]
+                            for p in data["prefixes"]
+                            if p.get("service") == "CLOUDFRONT" and "ip_prefix" in p
+                        )
+                    elif "ipv4_prefixes" in data:
+                        prefixes.extend(
+                            p["ip_prefix"] for p in data["ipv4_prefixes"] if "ip_prefix" in p
+                        )
+                    if prefixes:
+                        logger.info(f"[CDN INTEL] Dynamically fetched {len(prefixes)} CloudFront prefixes from {url}")
+                        return prefixes
+        except Exception as e:
+            logger.debug(f"[CDN INTEL] Dynamic fetch failed for {url}: {e}")
+    return []
+
+
+def _load_cdn_networks() -> List[Any]:
+    """Load combined static, cached, and dynamic CDN networks."""
+    all_cidrs: Set[str] = set(STATIC_CDN_CIDRS)
+
+    # 1. Check local cache
+    cached_prefixes: List[str] = []
+    cache_needs_refresh = True
+    if os.path.exists(CDN_CACHE_PATH):
+        try:
+            with open(CDN_CACHE_PATH, "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+                cached_prefixes = cdata.get("cloudfront_ipv4", []) or cdata.get("prefixes", [])
+                all_cidrs.update(cached_prefixes)
+
+                updated_at_str = cdata.get("updated_at")
+                if updated_at_str:
+                    try:
+                        clean_ts = updated_at_str.rstrip("Z")
+                        ts = time.time() - time.mktime(time.strptime(clean_ts[:19], "%Y-%m-%dT%H:%M:%S"))
+                        if ts < 86400:
+                            cache_needs_refresh = False
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"[CDN INTEL] Error reading CDN cache {CDN_CACHE_PATH}: {e}")
+
+    # 2. Dynamic fetch if needed
+    if cache_needs_refresh:
+        dyn_prefixes = _fetch_dynamic_cloudfront_ranges()
+        if dyn_prefixes:
+            all_cidrs.update(dyn_prefixes)
+            try:
+                os.makedirs(os.path.dirname(CDN_CACHE_PATH), exist_ok=True)
+                with open(CDN_CACHE_PATH, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "source": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+                        "cloudfront_ipv4": dyn_prefixes,
+                        "total_prefixes": len(dyn_prefixes),
+                    }, f, indent=2)
+                logger.info(f"[CDN INTEL] Cached {len(dyn_prefixes)} dynamic CloudFront prefixes to {CDN_CACHE_PATH}")
+            except Exception as e:
+                logger.warning(f"[CDN INTEL] Failed to write CDN cache: {e}")
+
+    compiled = []
+    for cidr in all_cidrs:
+        try:
+            compiled.append(ipaddress.ip_network(cidr.strip()))
+        except ValueError:
+            pass
+    return compiled
+
+
+CDN_CIDR_NETWORKS = _load_cdn_networks()
 
 
 def _is_cdn_ip(ip_str: str) -> bool:
@@ -62,6 +176,8 @@ def _is_cdn_ip(ip_str: str) -> bool:
         return False
     try:
         ip_obj = ipaddress.ip_address(ip_str)
+        if ip_obj.is_loopback or ip_obj.is_private:
+            return False
         for net in CDN_CIDR_NETWORKS:
             if ip_obj in net:
                 return True
@@ -393,7 +509,7 @@ def _run_stage2_live_probing(
     resolved_ip: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Stage 2: Live Web Probing and Technology Detection using httpx."""
-    httpx_bin = shutil.which("httpx") or "/usr/local/bin/httpx"
+    httpx_bin = shutil.which("httpx-toolkit") or shutil.which("httpx") or "/usr/local/bin/httpx"
     live_hosts: List[Dict[str, Any]] = []
 
     if not os.path.exists(httpx_bin):
@@ -441,6 +557,9 @@ def _run_stage2_live_probing(
                 if not url:
                     continue
 
+                host_ips = rec.get("a") or []
+                main_ip = rec.get("host_ip") or (host_ips[0] if host_ips else "")
+
                 cdn_name = rec.get("cdn_name") or ""
                 cdn_type = rec.get("cdn_type") or ""
                 webserver = (rec.get("webserver") or "").lower()
@@ -450,9 +569,6 @@ def _run_stage2_live_probing(
                     any(_is_cdn_ip(aip) for aip in host_ips) or
                     any(c in webserver for c in ["cloudflare", "fastly", "akamai", "cloudfront", "incapsula"])
                 )
-
-                host_ips = rec.get("a") or []
-                main_ip = rec.get("host_ip") or (host_ips[0] if host_ips else "")
 
                 # Detect WAF signatures in webserver, cdn_name, or detected technologies
                 host_waf = None
@@ -519,7 +635,7 @@ def _resolve_and_verify_origin_infrastructure(
         (origin_infrastructure_map, list_of_confirmed_origin_ips)
     """
     logger.info(f"[ORIGIN AUDIT] Initiating origin detection and vhost mapping for {root_domain}...")
-    httpx_bin = shutil.which("httpx") or "/usr/local/bin/httpx"
+    httpx_bin = shutil.which("httpx-toolkit") or shutil.which("httpx") or "/usr/local/bin/httpx"
     if not os.path.exists(httpx_bin):
         logger.warning(f"[ORIGIN AUDIT] httpx binary not found at '{httpx_bin}'. Skipping origin vhost verification.")
         return [], []
@@ -633,7 +749,7 @@ def _resolve_and_verify_origin_infrastructure(
 
         # Determine ports to probe
         ports_to_probe = [443, 80]
-        # In docker/private environments, include port 3000 (Juice Shop / internal services)
+        # In docker/private environments, include port 3000 (standard web app / internal services)
         if any(c.startswith("172.") or c.startswith("10.") or c.startswith("192.168.") for c in ordered_candidates):
             ports_to_probe.extend([3000, 8080])
 
@@ -645,6 +761,9 @@ def _resolve_and_verify_origin_infrastructure(
                     httpx_bin,
                     "-u", target_url,
                     "-H", f"Host: {vhost_domain}",
+                    "-location",
+                    "-content-length",
+                    "-body-preview",
                     "-status-code",
                     "-title",
                     "-tech-detect",
@@ -665,31 +784,103 @@ def _resolve_and_verify_origin_infrastructure(
                             if not sc:
                                 continue
 
-                            title = rec.get("title") or ""
+                            title = (rec.get("title") or "").strip()
                             tech = rec.get("tech") or []
                             title_lower = title.lower()
+                            location = (rec.get("location") or "").strip()
+                            content_len = rec.get("content_length") or 0
+                            body_prev = (rec.get("body_preview") or "").strip().lower()
+
+                            # Stage 2 live probe context for this vhost (for fingerprint equivalence)
+                            known_title = (vhost_entry.get("title") or "").strip()
+                            known_title_lower = known_title.lower()
+
                             domain_core = root_domain.split(".")[0].lower()
+                            if domain_core in ("www", "api", "app", "dev", "mail", "portal") and "." in root_domain:
+                                domain_core = root_domain.split(".")[1].lower()
 
-                            # Criteria for confirmed origin:
-                            # 1) HTTP 200 with domain name or app in title
-                            # 2) HTTP 200 without CDN error page
-                            # 3) Redirect (301, 302, 307, 308) indicating vhost dispatching
                             is_confirmed = False
-                            if sc == 200:
-                                if (
-                                    domain_core in title_lower or
-                                    "centurion" in title_lower or
-                                    "cutm" in title_lower or
-                                    "juice shop" in title_lower or
-                                    (title and "cloudflare" not in title_lower and "access denied" not in title_lower)
-                                ):
-                                    is_confirmed = True
-                                elif len(rec.get("a") or []) > 0:
-                                    is_confirmed = True
-                            elif sc in (301, 302, 307, 308):
-                                is_confirmed = True
+                            confidence = "inferred"
+                            audit_note = ""
 
-                            confidence = "confirmed" if is_confirmed else "inferred"
+                            # Check for explicit CDN / WAF block pages or errors
+                            is_blocked_or_error = any(
+                                err in title_lower for err in [
+                                    "cloudflare", "access denied", "attention required",
+                                    "403 forbidden", "waf", "security service", "request blocked",
+                                    "ddos-guard", "imperva", "incapsula", "sucuri"
+                                ]
+                            )
+
+                            if sc == 200:
+                                if is_blocked_or_error:
+                                    confidence = "rejected"
+                                    audit_note = f"HTTP 200 CDN/WAF error page or access denied: '{title}'"
+                                else:
+                                    # Strict Domain Relevance Validation
+                                    domain_in_title = bool(
+                                        (len(domain_core) >= 3 and domain_core in title_lower) or
+                                        (root_domain.lower() in title_lower)
+                                    )
+                                    title_matches_known = bool(
+                                        known_title_lower and (
+                                            title_lower == known_title_lower or
+                                            (len(known_title_lower) >= 5 and known_title_lower in title_lower)
+                                        )
+                                    )
+                                    domain_in_body = bool(
+                                        root_domain.lower() in body_prev or
+                                        vhost_domain.lower() in body_prev or
+                                        (len(domain_core) >= 4 and domain_core in body_prev)
+                                    )
+
+                                    if domain_in_title or title_matches_known or domain_in_body:
+                                        is_confirmed = True
+                                        confidence = "confirmed"
+                                        match_reasons = []
+                                        if domain_in_title:
+                                            match_reasons.append("title identity")
+                                        if title_matches_known:
+                                            match_reasons.append(f"probed title match '{known_title[:30]}'")
+                                        if domain_in_body:
+                                            match_reasons.append("body domain marker")
+                                        audit_note = f"HTTP 200: Verified via {', '.join(match_reasons)}"
+                                    else:
+                                        confidence = "inferred"
+                                        audit_note = f"HTTP 200: Active service without explicit domain identity (title: '{title[:40] or 'none'}')"
+
+                            elif sc in (301, 302, 307, 308):
+                                if not location:
+                                    confidence = "inferred"
+                                    audit_note = f"HTTP {sc} redirect without Location header"
+                                else:
+                                    loc_lower = location.lower()
+                                    is_relative_redirect = location.startswith("/")
+                                    is_target_domain_redirect = (
+                                        vhost_domain.lower() in loc_lower or
+                                        root_domain.lower() in loc_lower
+                                    )
+                                    if is_relative_redirect or is_target_domain_redirect:
+                                        is_confirmed = True
+                                        confidence = "confirmed"
+                                        audit_note = f"HTTP {sc} redirect to valid target: {location}"
+                                    else:
+                                        confidence = "inferred"
+                                        audit_note = f"HTTP {sc} redirect to unrelated host: {location}"
+
+                            elif sc in (401, 403):
+                                if (len(domain_core) >= 3 and domain_core in title_lower) or (root_domain.lower() in title_lower):
+                                    confidence = "inferred"
+                                    audit_note = f"HTTP {sc}: Authentication required on target virtual host"
+                                else:
+                                    confidence = "rejected"
+                                    audit_note = f"HTTP {sc}: Access forbidden/denied on candidate IP"
+
+                            else:
+                                # 404, 500, 502, 503, etc.
+                                confidence = "rejected"
+                                audit_note = f"HTTP {sc}: Error response from candidate IP"
+
                             if is_confirmed:
                                 confirmed_origin_ips.add(cand_ip)
 
@@ -705,17 +896,24 @@ def _resolve_and_verify_origin_infrastructure(
                                 "title": title or ("Active Service" if sc == 200 else f"HTTP {sc}"),
                                 "tech": tech,
                                 "routed_via": f"Host: {vhost_domain}",
+                                "audit_note": audit_note,
                             }
-                            # Deduplicate mapping entries
-                            if not any(
-                                m["domain"] == vhost_domain and m["origin_ip"] == cand_ip and m["origin_port"] == port
-                                for m in origin_map
-                            ):
+                            # Deduplicate mapping entries (preserve highest confidence)
+                            existing_idx = next(
+                                (i for i, m in enumerate(origin_map)
+                                 if m["domain"] == vhost_domain and m["origin_ip"] == cand_ip and m["origin_port"] == port),
+                                None
+                            )
+                            priority = {"confirmed": 3, "inferred": 2, "rejected": 1}
+                            if existing_idx is None:
                                 origin_map.append(mapping_entry)
                                 logger.info(
-                                    f"[ORIGIN AUDIT] Discovered origin {cand_ip}:{port} for {vhost_domain} "
-                                    f"({confidence.upper()} - HTTP {sc} '{title}')"
+                                    f"[ORIGIN AUDIT] Evaluated origin candidate {cand_ip}:{port} for {vhost_domain} "
+                                    f"({confidence.upper()} - HTTP {sc} '{title}') - {audit_note}"
                                 )
+                            else:
+                                if priority.get(confidence, 0) > priority.get(origin_map[existing_idx]["confidence"], 0):
+                                    origin_map[existing_idx] = mapping_entry
                         except json.JSONDecodeError:
                             continue
                 except Exception as e:
