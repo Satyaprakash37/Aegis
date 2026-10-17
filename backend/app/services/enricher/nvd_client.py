@@ -117,6 +117,26 @@ GENERIC_SERVICE_BLACKLIST: Set[str] = {
     "ssh",
 }
 
+# Proprietary banners, reverse proxies, and CDN signatures that must NEVER trigger speculative NVD CVE queries
+PROPRIETARY_OR_GENERIC_BANNERS: Set[str] = {
+    "gws",
+    "sffe",
+    "esf",
+    "gfe",
+    "google",
+    "google web server",
+    "cloudflare",
+    "akamai",
+    "fastly",
+    "cloudfront",
+    "envoy",
+    "proxy",
+    "reverse proxy",
+    "unknown",
+    "tcpwrapped",
+    "embedded",
+}
+
 # Approximate release years for major software branches to guard against ancient CVEs
 SOFTWARE_GENERATION_YEARS: Dict[str, Dict[str, int]] = {
     "MariaDB": {
@@ -236,7 +256,56 @@ def is_cve_applicable(
         cve_year = int(year_match.group(1))
 
     desc_lower = description.lower()
-    prod_lower = product.lower()
+    prod_lower = (product or "").lower().strip()
+
+    # Guard 0: Require credible product identity and numeric version
+    if not prod_lower or prod_lower in GENERIC_SERVICE_BLACKLIST:
+        logger.info(f"Filtering false positive {cve_id}: no credible product identity for '{product}'")
+        return False
+
+    if not version or not re.search(r"\d+", version):
+        logger.info(f"Filtering false positive {cve_id}: no credible numeric version provided for {product}")
+        return False
+
+    # Guard 1: Reject proprietary or generic banners from matching any CVE
+    if prod_lower in PROPRIETARY_OR_GENERIC_BANNERS:
+        logger.info(f"Filtering false positive {cve_id}: proprietary/generic banner '{product}' cannot be matched to CVEs")
+        return False
+
+    # Guard 2: Linux Kernel & Hardware Driver Guard (e.g. AMD GPU, DRM, sound, bluetooth)
+    # Network services must never match local Linux kernel or hardware driver vulnerabilities
+    kernel_hardware_terms = [
+        "drm/amdgpu",
+        "amdgpu",
+        "radeon",
+        "intel-i915",
+        "nouveau",
+        "sound/soc",
+        "net/bluetooth",
+        "linux kernel",
+        "in the linux kernel",
+        "global wave sync",
+        "rdna",
+        "modprobe",
+    ]
+    if any(term in desc_lower for term in kernel_hardware_terms):
+        if "linux" not in prod_lower and "kernel" not in prod_lower:
+            logger.info(f"Filtering false positive {cve_id}: Linux kernel/hardware CVE does not apply to network service {product}")
+            return False
+
+    # Guard 3: Unrelated vendor/product collisions (e.g. SAP CRM Gwsync, GWScripts news.cgi)
+    if any(term in desc_lower for term in ["sap crm", "gwscripts", "gwsync"]):
+        if "sap" not in prod_lower and "gwscripts" not in prod_lower:
+            logger.info(f"Filtering false positive {cve_id}: unrelated product CVE does not apply to {product}")
+            return False
+
+    # Guard 4: Short token product credibility check (prevent substring collisions)
+    if len(prod_lower) <= 4:
+        # Short token must appear as a distinct whole word, not as a random acronym or substring
+        word_pattern = r"\b" + re.escape(prod_lower) + r"\b"
+        if not re.search(word_pattern, desc_lower):
+            logger.info(f"Filtering false positive {cve_id}: token '{product}' not found as distinct word in description")
+            return False
 
     # Rule A: MariaDB vs MySQL segregation
     if "mariadb" in prod_lower:
@@ -319,6 +388,32 @@ def is_cve_applicable(
             pass
 
     return True
+
+
+def create_unversioned_observation(
+    product: Optional[str] = None,
+    service: Optional[str] = None,
+    cpe: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Generate an informational needs-verification observation for an identifiable service lacking a version."""
+    clean_prod, _ = normalize_service_identity(product=product, service=service, cpe=cpe)
+    if not clean_prod:
+        return None
+    prod_low = clean_prod.lower()
+    if prod_low in PROPRIETARY_OR_GENERIC_BANNERS or prod_low in GENERIC_SERVICE_BLACKLIST:
+        return None
+    return {
+        "cve_id": f"INFO-{clean_prod.upper().replace(' ', '-')}-UNVERSIONED"[:50],
+        "title": f"Unversioned Service Identified: {clean_prod}",
+        "description": (
+            f"The service was identified as {clean_prod}, but no version string was detected. "
+            "Version-specific CVE applicability could not be verified automatically and requires manual confirmation."
+        ),
+        "cvss_score": 0.0,
+        "severity": "none",
+        "needs_verification": True,
+        "verification": "version_match",
+    }
 
 
 class NVDClient:
@@ -447,6 +542,7 @@ class NVDClient:
         service: Optional[str] = None,
         version: Optional[str] = None,
         cpe: Optional[str] = None,
+        record_observation: bool = False,
     ) -> List[Dict[str, Any]]:
         """Query NVD 2.0 for known CVE vulnerabilities with precision normalization and guards."""
         clean_prod, clean_ver = normalize_service_identity(
@@ -457,26 +553,37 @@ class NVDClient:
         )
 
         clean_serv = (service or "").strip().lower()
+        raw_p = (product or "").strip().lower()
 
-        # Guard: If no product and no version, and service is generic (e.g. submission, smtp, domain), SKIP
-        if not clean_prod and not clean_ver:
-            if not clean_serv or clean_serv in GENERIC_SERVICE_BLACKLIST:
+        # Guard 1: Proprietary banners and CDN reverse proxies must never trigger NVD queries
+        if raw_p in PROPRIETARY_OR_GENERIC_BANNERS or (clean_prod and clean_prod.lower() in PROPRIETARY_OR_GENERIC_BANNERS):
+            logger.info(f"Skipping proprietary/generic banner '{raw_p or clean_prod}' from NVD enrichment")
+            return []
+
+        # Guard 2: Require a concrete numeric version for version-match enrichment
+        # Without a version, a software CVE cannot be verified as an applicable version match
+        if not clean_ver or not re.search(r"\d+", clean_ver):
+            logger.info(f"Skipping unversioned service '{clean_prod or clean_serv}' from NVD enrichment (numeric version required)")
+            if record_observation and clean_prod:
+                obs = create_unversioned_observation(product=clean_prod, service=service, cpe=cpe)
+                if obs:
+                    return [obs]
+            return []
+
+        # Guard 3: If no product and no version, and service is generic (e.g. submission, smtp, domain), SKIP
+        if not clean_prod:
+            if not clean_serv or clean_serv in GENERIC_SERVICE_BLACKLIST or clean_serv in PROPRIETARY_OR_GENERIC_BANNERS:
                 logger.debug(f"Skipping generic/empty service '{clean_serv}' from NVD false positive generation")
                 return []
-
-        # If clean_prod is empty but clean_serv is specific and not blacklisted
-        if not clean_prod and clean_serv and clean_serv not in GENERIC_SERVICE_BLACKLIST:
             clean_prod = PRODUCT_NORMALIZATION.get(clean_serv, clean_serv)
 
-        # Construct high-confidence search keywords
-        keywords_to_try: List[str] = []
-        if clean_prod and clean_ver:
-            keywords_to_try.append(f"{clean_prod} {clean_ver}")
-            # Only add bare product if version is short or specific product
-            if clean_prod not in ["LiteSpeed Web Server", "Dovecot", "PowerDNS Authoritative Server"]:
-                keywords_to_try.append(clean_prod)
-        elif clean_prod:
-            keywords_to_try.append(clean_prod)
+        # Guard 4: Short acronyms (<= 4 chars) must be in known normalized products, not searched bare
+        if len(clean_prod) <= 4 and clean_prod.lower() not in [k.lower() for k in PRODUCT_NORMALIZATION.values()]:
+            logger.info(f"Skipping short unmapped product token '{clean_prod}' from NVD search")
+            return []
+
+        # Construct high-confidence search keywords strictly WITH version
+        keywords_to_try: List[str] = [f"{clean_prod} {clean_ver}"]
 
         if not keywords_to_try:
             return []

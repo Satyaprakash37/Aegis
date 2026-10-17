@@ -1170,6 +1170,59 @@ def _run_stage4_nuclei_target(
     return findings
 
 
+RE_NON_VULNERABLE = re.compile(
+    r"\b(not vulnerable|not affected|no fallback|not offered)\b", re.IGNORECASE
+)
+RE_UNMITIGATED = re.compile(
+    r"\b(unmitigated|not mitigated|no mitigation)\b", re.IGNORECASE
+)
+RE_MITIGATED = re.compile(
+    r"\b(likely mitigated|client[- ]side mitigation|mitigated by higher protocols|mitigated)\b",
+    re.IGNORECASE,
+)
+RE_INCONCLUSIVE_ERROR = re.compile(
+    r"\b(handshake timed out|connection timed out|timed out|timeout|connection reset|connection refused|"
+    r"unexpected eof|could not connect|handshake failed|scan timed out|"
+    r"scan interrupted by signal|interrupted by signal|scan interrupted|"
+    r"server returned http \d+|internal server error|http error|bad gateway|service unavailable)\b",
+    re.IGNORECASE,
+)
+RE_POSITIVE_INDICATORS = re.compile(
+    r"\b(vulnerable|uses 64 bit block ciphers|uses 3des|offered \(deprecated\))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_mitigated(text: str) -> bool:
+    """Return True if text explicitly indicates mitigation and is not unmitigated."""
+    if not text:
+        return False
+    if RE_UNMITIGATED.search(text):
+        return False
+    return bool(RE_MITIGATED.search(text))
+
+
+def _is_non_vulnerable(text: str) -> bool:
+    """Return True if text explicitly indicates non-vulnerable / not affected."""
+    if not text:
+        return False
+    return bool(RE_NON_VULNERABLE.search(text))
+
+
+def _is_inconclusive_error(text: str) -> bool:
+    """Return True if text indicates timeout, reset, connection failure, or interrupted scan."""
+    if not text:
+        return False
+    return bool(RE_INCONCLUSIVE_ERROR.search(text))
+
+
+def _is_positive_finding(text: str) -> bool:
+    """Return True if text has positive indicators of a vulnerability."""
+    if not text:
+        return False
+    return bool(RE_POSITIVE_INDICATORS.search(text))
+
+
 def _parse_testssl_records(
     records: List[Dict[str, Any]],
     target: str,
@@ -1177,13 +1230,17 @@ def _parse_testssl_records(
     """Parse testssl.sh JSON array into verified vulnerabilities."""
     findings = []
     seen_keys = set()
+    host_tag = f" ({target})" if target else ""
 
     for item in records:
-        test_id = item.get("id", "")
-        sev = str(item.get("severity", "")).upper()
-        finding_text = item.get("finding", "")
-        cve_field = item.get("cve", "")
-        port = int(item.get("port", 443)) if str(item.get("port", "")).isdigit() else 443
+        if not isinstance(item, dict):
+            continue
+        test_id = str(item.get("id") or "")
+        sev = str(item.get("severity") or "").upper().strip()
+        finding_text = str(item.get("finding") or "").strip()
+        cve_field = str(item.get("cve") or "").strip()
+        raw_port = item.get("port", 443)
+        port = int(raw_port) if str(raw_port).isdigit() else 443
 
         finding_lower = finding_text.lower()
 
@@ -1191,111 +1248,158 @@ def _parse_testssl_records(
         if sev in ("OK", "INFO"):
             continue
 
+        # Inconclusive/error check: Timeouts, resets, handshake failures must not create confirmed vulns
+        if _is_inconclusive_error(finding_text) and not _is_positive_finding(finding_text):
+            continue
+
         # 1. Deprecated TLS 1.0 or TLS 1.1
-        if test_id in ("TLS1", "TLS1_1") and ("offered" in finding_lower or sev in ("LOW", "MEDIUM", "WARN")):
+        if test_id in ("TLS1", "TLS1_1"):
+            if _is_non_vulnerable(finding_text) or _is_mitigated(finding_text):
+                continue
+            if _is_inconclusive_error(finding_text) and not _is_positive_finding(finding_text):
+                continue
             if "not offered" in finding_lower:
                 continue
-            proto_name = "TLS 1.0" if test_id == "TLS1" else "TLS 1.1"
-            cve_id = f"SSL-{test_id}-DEPRECATED"
-            if cve_id not in seen_keys:
-                seen_keys.add(cve_id)
-                findings.append({
-                    "cve_id": cve_id,
-                    "title": f"Deprecated {proto_name} Protocol Enabled",
-                    "description": f"Target supports {proto_name}, which is deprecated by IETF RFC 8996 and susceptible to downgrade attacks.",
-                    "cvss_score": 5.3,
-                    "severity": VulnerabilitySeverity.medium,
-                    "port": port,
-                    "verification": VerificationType.ssl_verified.value,
-                    "evidence": f"Target: {target}\nProtocol: {proto_name}\ntestssl.sh Finding: {finding_text}\nSeverity: {sev}",
-                    "remediation": f"Disable {proto_name} in server SSL/TLS cipher and protocol configurations; require TLS 1.2+.",
-                })
+            if "offered" in finding_lower:
+                proto_name = "TLS 1.0" if test_id == "TLS1" else "TLS 1.1"
+                cve_id = f"SSL-{test_id}-DEPRECATED"
+                if cve_id not in seen_keys:
+                    seen_keys.add(cve_id)
+                    findings.append({
+                        "cve_id": cve_id,
+                        "title": f"Deprecated {proto_name} Protocol Enabled{host_tag}",
+                        "description": f"Target supports {proto_name}, which is deprecated by IETF RFC 8996 and susceptible to downgrade attacks.",
+                        "cvss_score": 5.3,
+                        "severity": VulnerabilitySeverity.medium,
+                        "port": port,
+                        "verification": VerificationType.ssl_verified.value,
+                        "target_host": target,
+                        "evidence": f"Audited Host: {target}\nProtocol: {proto_name}\ntestssl.sh Finding: {finding_text}\nSeverity: {sev}",
+                        "remediation": f"Disable {proto_name} in server SSL/TLS cipher and protocol configurations; require TLS 1.2+.",
+                    })
 
         # 2. Missing HSTS Header
         elif test_id == "HSTS" and "not offered" in finding_lower:
+            if "preloaded" in finding_lower or _is_mitigated(finding_text):
+                continue
+            if _is_inconclusive_error(finding_text):
+                continue
             cve_id = "SSL-MISSING-HSTS"
             if cve_id not in seen_keys:
                 seen_keys.add(cve_id)
                 findings.append({
                     "cve_id": cve_id,
-                    "title": "Strict-Transport-Security (HSTS) Header Missing",
+                    "title": f"Strict-Transport-Security (HSTS) Header Missing{host_tag}",
                     "description": "The remote web server does not provide an HTTP Strict Transport Security (HSTS) header, allowing potential SSL stripping.",
                     "cvss_score": 3.7,
                     "severity": VulnerabilitySeverity.low,
                     "port": port,
                     "verification": VerificationType.ssl_verified.value,
-                    "evidence": f"Target: {target}\nHeader: Strict-Transport-Security\ntestssl.sh Finding: {finding_text}",
+                    "target_host": target,
+                    "evidence": f"Audited Host: {target}\nHeader: Strict-Transport-Security\ntestssl.sh Finding: {finding_text}",
                     "remediation": "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains' to all HTTPS responses.",
                 })
 
         # 3. Known SSL Vulnerabilities
         elif test_id in ("heartbleed", "ROBOT", "poodle_ssl", "LOGJAM", "BEAST", "SWEET32", "FREAK", "DROWN"):
-            if "not vulnerable" in finding_lower or "not affected" in finding_lower:
+            # A. Exclude explicit non-vulnerable or mitigated findings
+            if _is_non_vulnerable(finding_text) or _is_mitigated(finding_text):
                 continue
-            if sev in ("LOW", "MEDIUM", "HIGH", "CRITICAL", "WARN") or "vulnerable" in finding_lower:
-                first_cve = cve_field.split()[0].strip() if cve_field else ""
-                vuln_cve = first_cve or {
-                    "heartbleed": "CVE-2014-0160",
-                    "ROBOT": "CVE-2017-13099",
-                    "poodle_ssl": "CVE-2014-3566",
-                    "LOGJAM": "CVE-2015-4000",
-                    "BEAST": "CVE-2011-3389",
-                    "SWEET32": "CVE-2016-2183",
-                    "FREAK": "CVE-2015-0204",
-                    "DROWN": "CVE-2016-0800",
-                }.get(test_id, f"SSL-{test_id.upper()}")
-                vuln_cve = vuln_cve[:49]
 
-                if vuln_cve not in seen_keys:
-                    seen_keys.add(vuln_cve)
-                    sev_enum = VulnerabilitySeverity.high if test_id in ("heartbleed", "ROBOT", "LOGJAM", "DROWN") else VulnerabilitySeverity.medium
-                    cvss = 7.5 if sev_enum == VulnerabilitySeverity.high else 5.3
-                    findings.append({
-                        "cve_id": vuln_cve,
-                        "title": f"SSL/TLS Protocol Vulnerability: {test_id.upper()}",
-                        "description": f"Target is vulnerable to {test_id.upper()} ({vuln_cve}). Finding: {finding_text}",
-                        "cvss_score": cvss,
-                        "severity": sev_enum,
-                        "port": port,
-                        "verification": VerificationType.ssl_verified.value,
-                        "evidence": f"Target: {target}\nVulnerability: {test_id}\ntestssl.sh Finding: {finding_text}\nSeverity: {sev}",
-                        "remediation": f"Upgrade OpenSSL libraries and update TLS server configuration for {test_id.upper()}.",
-                    })
+            # B. Check for explicit vulnerability-specific positive evidence
+            has_positive_evidence = (
+                _is_positive_finding(finding_text)
+                and not _is_non_vulnerable(finding_text)
+                and not _is_mitigated(finding_text)
+            )
 
-        # 4. Weak / Broken Cipher Suites
-        elif test_id in ("null_ciphers", "rc4", "des_ciphers", "weak_ciphers") and ("offered" in finding_lower or sev in ("LOW", "MEDIUM", "HIGH", "WARN")):
-            if "not offered" in finding_lower:
+            # C. Inconclusive errors without independent positive evidence must not confirm a vulnerability
+            if _is_inconclusive_error(finding_text) and not has_positive_evidence:
                 continue
-            cve_id = f"SSL-WEAK-CIPHER-{test_id.upper()}"
-            if cve_id not in seen_keys:
-                seen_keys.add(cve_id)
+
+            # D. A WARN severity alone must never confirm a vulnerability without explicit positive evidence
+            if sev == "WARN" and not has_positive_evidence:
+                continue
+
+            # E. Non-positive findings must have a confirmed severity and no inconclusive errors
+            if not has_positive_evidence and sev not in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
+                continue
+
+            first_cve = cve_field.split()[0].strip() if cve_field else ""
+            vuln_cve = first_cve or {
+                "heartbleed": "CVE-2014-0160",
+                "ROBOT": "CVE-2017-13099",
+                "poodle_ssl": "CVE-2014-3566",
+                "LOGJAM": "CVE-2015-4000",
+                "BEAST": "CVE-2011-3389",
+                "SWEET32": "CVE-2016-2183",
+                "FREAK": "CVE-2015-0204",
+                "DROWN": "CVE-2016-0800",
+            }.get(test_id, f"SSL-{test_id.upper()}")
+            vuln_cve = vuln_cve[:49]
+
+            if vuln_cve not in seen_keys:
+                seen_keys.add(vuln_cve)
+                sev_enum = VulnerabilitySeverity.high if test_id in ("heartbleed", "ROBOT", "LOGJAM", "DROWN") else VulnerabilitySeverity.medium
+                cvss = 7.5 if sev_enum == VulnerabilitySeverity.high else 5.3
                 findings.append({
-                    "cve_id": cve_id,
-                    "title": f"Insecure Cipher Suite Supported ({test_id.replace('_', ' ').title()})",
-                    "description": f"Server negotiates legacy or weak cipher suites ({test_id}): {finding_text}",
-                    "cvss_score": 5.9,
-                    "severity": VulnerabilitySeverity.medium,
+                    "cve_id": vuln_cve,
+                    "title": f"SSL/TLS Protocol Vulnerability: {test_id.upper()}{host_tag}",
+                    "description": f"Target is vulnerable to {test_id.upper()} ({vuln_cve}). Finding: {finding_text}",
+                    "cvss_score": cvss,
+                    "severity": sev_enum,
                     "port": port,
                     "verification": VerificationType.ssl_verified.value,
-                    "evidence": f"Target: {target}\nCipher Category: {test_id}\ntestssl.sh Finding: {finding_text}",
-                    "remediation": "Restrict TLS configuration to modern, authenticated AEAD cipher suites only.",
+                    "target_host": target,
+                    "evidence": f"Audited Host: {target}\nVulnerability: {test_id}\ntestssl.sh Finding: {finding_text}\nSeverity: {sev}",
+                    "remediation": f"Upgrade OpenSSL libraries and update TLS server configuration for {test_id.upper()}.",
                 })
+
+        # 4. Weak / Broken Cipher Suites
+        elif test_id in ("null_ciphers", "rc4", "des_ciphers", "weak_ciphers"):
+            if _is_non_vulnerable(finding_text) or _is_mitigated(finding_text):
+                continue
+            if _is_inconclusive_error(finding_text) and not _is_positive_finding(finding_text):
+                continue
+            if "not offered" in finding_lower:
+                continue
+            if "offered" in finding_lower:
+                cve_id = f"SSL-WEAK-CIPHER-{test_id.upper()}"
+                if cve_id not in seen_keys:
+                    seen_keys.add(cve_id)
+                    findings.append({
+                        "cve_id": cve_id,
+                        "title": f"Insecure Cipher Suite Supported ({test_id.replace('_', ' ').title()}){host_tag}",
+                        "description": f"Server negotiates legacy or weak cipher suites ({test_id}): {finding_text}",
+                        "cvss_score": 5.9,
+                        "severity": VulnerabilitySeverity.medium,
+                        "port": port,
+                        "verification": VerificationType.ssl_verified.value,
+                        "target_host": target,
+                        "evidence": f"Audited Host: {target}\nCipher Category: {test_id}\ntestssl.sh Finding: {finding_text}",
+                        "remediation": "Restrict TLS configuration to modern, authenticated AEAD cipher suites only.",
+                    })
 
         # 5. Certificate Lifecycle Anomaly
         elif test_id in ("cert_expiration_status", "cert_self_signed", "cert_common_name_mismatch"):
+            if _is_non_vulnerable(finding_text):
+                continue
+            if _is_inconclusive_error(finding_text):
+                continue
             if sev in ("LOW", "MEDIUM", "HIGH", "WARN"):
                 cve_id = f"SSL-CERT-{test_id.upper().replace('_', '-')}"
                 if cve_id not in seen_keys:
                     seen_keys.add(cve_id)
                     findings.append({
                         "cve_id": cve_id,
-                        "title": f"SSL/TLS Certificate Finding: {test_id.replace('_', ' ').title()}",
+                        "title": f"SSL/TLS Certificate Finding: {test_id.replace('_', ' ').title()}{host_tag}",
                         "description": f"Certificate anomaly: {finding_text}",
                         "cvss_score": 4.5,
                         "severity": VulnerabilitySeverity.medium,
                         "port": port,
                         "verification": VerificationType.ssl_verified.value,
-                        "evidence": f"Target: {target}\nCheck: {test_id}\ntestssl.sh Finding: {finding_text}",
+                        "target_host": target,
+                        "evidence": f"Audited Host: {target}\nCheck: {test_id}\ntestssl.sh Finding: {finding_text}",
                         "remediation": "Deploy a valid, currently active, trusted certificate matching the hostname.",
                     })
 
